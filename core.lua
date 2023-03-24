@@ -1,8 +1,9 @@
 
-local function EmpirePlay(sound)
-return PlaySoundFile(sound,"Dialog")
-end
+
 local soundFolder = "Interface\\AddOns\\WoWofEmpires\\sound\\"
+local function EmpirePlay(sound)
+return PlaySoundFile(soundFolder..""..sound,"Dialog")
+end
 gSoundFolder = soundFolder
 local events = {"CHAT_MSG_YELL","CHAT_MSG_SAY","CHAT_MSG_PARTY","CHAT_MSG_WHISPER","CHAT_MSG_PARTY_LEADER","CHAT_MSG_GUILD","CHAT_MSG_RAID","CHAT_MSG_RAID_LEADER","CHAT_MSG_EMOTE"}
 local playerName = UnitName("player")
@@ -88,9 +89,9 @@ local function spairs(t, order)
         end
     end
 end
-local function DeathSound()
+function DeathSound()
 local i = math.random(4)
-EmpirePlay(soundFolder.."death"..i..".mp3")
+EmpirePlay("death"..i..".mp3")
 end
 local function DeathEvent(self, event, ...)
     DeathSound()
@@ -100,7 +101,7 @@ deathframe:RegisterEvent("PLAYER_DEAD")
 deathframe:SetScript("OnEvent", DeathEvent)
 
 local function RaiseEvent(self, event, ...)
-    EmpirePlay(soundFolder.."born.mp3")
+    EmpirePlay("born.mp3")
 end
 local raiseframe = CreateFrame("Frame")
 raiseframe:RegisterEvent("PLAYER_UNGHOST")
@@ -111,18 +112,25 @@ local function cleuEvent(self, event)
 local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType = CombatLogGetCurrentEventInfo()
 
 if subevent == "SPELL_AURA_REFRESH" and spellName == "Mind Control" and destName == playerName then
-EmpirePlay(soundFolder.."Ingemar-Franko.mp3")
+EmpirePlay("Ingemar-Franko.mp3")
 end
 if subevent == "SPELL_CAST_SUCCESS" then
 if spellName == "Death Coil" and destName == playerName then
-EmpirePlay(soundFolder.."vemvare.ogg")
+EmpirePlay("vemvare.ogg")
+end
+if spellName == "Blink" and sourceName == playerName then
+local i = math.random(1,10)
+if i == 1 then
+EmpirePlay("blink.ogg")
+print("Här kan man va!")
+end
 end
 end
 if subevent == "PARTY_KILL" then
 locClass = GetPlayerInfoByGUID(destGUID)
 if locClass ~= nil then
 print("VILKET NYP!!!!!!!")
-EmpirePlay(soundFolder.."Herb_laugh.ogg")
+EmpirePlay("Herb_laugh.ogg")
 end
 end
 
@@ -253,8 +261,8 @@ eventCheck = true
 end
 end
 	if (eventCheck == true) then
-		if StringToSound[tostring(text)] ~= nil then _,currentHandle = EmpirePlay(soundFolder..""..StringToSound[tostring(text)]) end
-		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(soundFolder..""..IntToSound[tonumber(text)]) end
+		if StringToSound[tostring(text)] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(text)]) end
+		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(""..IntToSound[tonumber(text)]) end
 
 		
 	end
