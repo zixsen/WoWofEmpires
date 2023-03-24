@@ -57,6 +57,7 @@ local StringToSound = {
 ["fast"] = "im-fast-as-fuck-boii-2.mp3",
 ["snoop"] = "snoop dogg.mp3",
 ["wow"] = "wow.ogg",
+["hype"] = "Zulp Hype.ogg",
 }
 
 
@@ -134,7 +135,7 @@ print("Här kan man va!")
 end
 end
 end
-if subevent == "PARTY_KILL" then
+if subevent == "PARTY_KILL" and UnitInBattleground("player") == nil then
 locClass = GetPlayerInfoByGUID(destGUID)
 if locClass ~= nil then
 print("VILKET NYP!!!!!!!")
