@@ -1,7 +1,7 @@
 
 
 local soundFolder = "Interface\\AddOns\\WoWofEmpires\\sound\\"
-local function EmpirePlay(sound)
+function EmpirePlay(sound)
 return PlaySoundFile(soundFolder..""..sound,"Dialog")
 end
 gSoundFolder = soundFolder
@@ -60,7 +60,11 @@ local StringToSound = {
 }
 
 
-
+local TEH_SQUAD = {
+["Addons"] = true,
+["Krasslig"] = true,
+["Moffegreven"] = true,
+}
 local listPopulated = false
 local displayList = {};	
  
@@ -89,9 +93,13 @@ local function spairs(t, order)
         end
     end
 end
-function DeathSound()
-local i = math.random(4)
+local function DeathSound(int)
+if int == nil then
+local i = math.random(5)
 EmpirePlay("death"..i..".mp3")
+else
+EmpirePlay("death"..int..".mp3")
+end
 end
 local function DeathEvent(self, event, ...)
     DeathSound()
