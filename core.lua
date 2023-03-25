@@ -166,7 +166,7 @@ local LootFrame = CreateFrame("Frame")
 LootFrame:RegisterEvent("START_LOOT_ROLL")
 LootFrame:SetScript("OnEvent", function(_, _, id)
 if not id then return end
-local texture, name, count, quality = GetLootRollItemInfo(rollID)
+local texture, name, count, quality = GetLootRollItemInfo(id)
 local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
 itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
     GetItemInfo(name)
