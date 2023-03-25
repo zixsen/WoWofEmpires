@@ -358,8 +358,9 @@ if event == events[i] then
 eventCheck = true
 end
 end
+
 	if (eventCheck == true) then
-		if StringToSound[tostring(text)] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(text)]) end
+		if StringToSound[tostring(string.lower(text))] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(string.lower(text))]) end
 		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(""..IntToSound[tonumber(text)]) end
 
 		
