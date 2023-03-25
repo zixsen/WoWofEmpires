@@ -58,6 +58,12 @@ local StringToSound = {
 ["snoop"] = "snoop dogg.mp3",
 ["wow"] = "wow.ogg",
 ["hype"] = "Zulp Hype.ogg",
+["bitconnect"] = "Bitconnect.ogg",
+["hehehey"] = "heheheey.ogg",
+["nonono"] = "mmhmmhnonono.ogg",
+["wassawassa"] = "wasa-wasa-wasa-wassup.ogg",
+["whaat"] = "whaaat.ogg",
+["whatsup"] = "wowwowWhatsUp.ogg",
 }
 
 
