@@ -1,6 +1,7 @@
 
 
 local soundFolder = "Interface\\AddOns\\WoWofEmpires\\sound\\"
+local textureFolder = "Interface\\AddOns\\WoWofEmpires\\texture\\"
 function EmpirePlay(sound)
 return PlaySoundFile(soundFolder..""..sound,"Dialog")
 end
@@ -151,6 +152,24 @@ end
 
 end
 
+
+local LootFrame = CreateFrame("Frame")
+LootFrame:RegisterEvent("START_LOOT_ROLL")
+LootFrame:SetScript("OnEvent", function(_, _, id)
+if not id then return end
+local texture, name, count, quality = GetLootRollItemInfo(rollID)
+local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
+itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
+    GetItemInfo(name)
+	if itemEquipLoc == "INVTYPE_FINGER" then
+	EmpirePlay("welkenring.ogg")
+	else
+	EmpirePlay("Sopahit.ogg")
+	end
+end)
+
+
+
 local cleu = CreateFrame("Frame")
 cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 cleu:SetScript("OnEvent", cleuEvent)
@@ -164,9 +183,67 @@ minibtn:SetMovable(true)
 minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
 minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
 minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+--[[
+local imgFrame = CreateFrame("FRAME", nil, UIParent,BackdropTemplateMixin and "BackdropTemplate") 
+local backdropInfo =
+{
+bgFile = textureFolder.."NewProject2.tga",
+--edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+tile = true,
+tileEdge = false,
+tileSize = 500,
+edgeSize = 8,
+insets = { left = 1, right = 1, top = 1, bottom = 1 },
+}
+--local imgFrame = CreateFrame("Frame")
+imgFrame:SetWidth(525)
+imgFrame:SetHeight(525)
 
- 
- 
+imgFrame:SetPoint("CENTER",UIParent,"Center")
+
+--imgFrame.texture = imgFrame:CreateTexture("IMG_TEXTURE","BACKGROUND")
+--imgFrame.texture:SetPoint("TOPLEFT")
+--imgFrame.texture:SetTexture(textureFolder.."test.tga")
+-- imgFrame:Show()
+
+local frame = CreateFrame("Frame")
+
+-- The minimum number of seconds between each update
+local ONUPDATE_INTERVAL = 0.04
+
+-- The number of seconds since the last update
+local TimeSinceLastUpdate = 0
+frame:SetScript("OnUpdate", function(self, elapsed)
+	TimeSinceLastUpdate = TimeSinceLastUpdate + elapsed
+	if TimeSinceLastUpdate >= ONUPDATE_INTERVAL then
+		TimeSinceLastUpdate = 0
+		local cameraZoom = GetCameraZoom()
+		local bginfo = backdropInfo
+		local factor = 25
+		bginfo.tileSize = 500-(cameraZoom*factor)
+print(bginfo.tileSize)
+imgFrame:SetBackdrop(bginfo)
+imgFrame:SetWidth(510-(cameraZoom*factor))
+imgFrame:SetHeight(510-(cameraZoom*factor))
+
+imgFrame:ApplyBackdrop()
+local a = math.random(-5,5)
+local b = math.random(-5,5)
+imgFrame:SetPoint("CENTER",UIParent,"Center",a,b)
+imgFrame:Show()
+imgFrame:Hide()
+		-- Do stuff
+	end
+end)
+
+-- When the frame is shown, reset the update timer
+frame:SetScript("OnShow", function(self)
+	TimeSinceLastUpdate = 0
+end)
+]]--
+
+
+
 local myIconPos = 0
  
 local function UpdateMapBtn()
