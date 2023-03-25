@@ -49,7 +49,7 @@ local StringToSound = {
 ["ohnono"] = "Oh-no-no-no.mp3",
 ["damn"] = "goddamnboah.mp3",
 ["bruh"] = "bruh.mp3",
-["yeaboi"] = "heheyeahboy.ogg",
+["yeboi"] = "heheyeahboy.ogg",
 ["anton"] = "anton.mp3",
 ["zzz"] = "zzz.ogg",
 ["gay"] = "hah-gay.mp3",
@@ -65,6 +65,7 @@ local StringToSound = {
 ["wassawassa"] = "wasa-wasa-wasa-wassup.ogg",
 ["whaat"] = "whaaat.ogg",
 ["whatsup"] = "wowwowWhatsUp.ogg",
+["run"] = "run.ogg",
 }
 
 
@@ -126,10 +127,16 @@ raiseframe:SetScript("OnEvent", RaiseEvent)
 
 local function cleuEvent(self, event)
 local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType = CombatLogGetCurrentEventInfo()
-
+local targetName = UnitName("target") or "noTarget"
 if subevent == "SPELL_AURA_REFRESH" and spellName == "Mind Control" and destName == playerName then
 EmpirePlay("Ingemar-Franko.mp3")
 end
+if subevent == "SPELL_AURA_REFRESH" and (spellName == "Web") and destName == targetName then
+EmpirePlay("spindelnat.ogg")
+end
+
+
+
 if subevent == "SPELL_CAST_SUCCESS" then
 if spellName == "Death Coil" and destName == playerName then
 EmpirePlay("vemvare.ogg")
@@ -151,7 +158,9 @@ end
 end
 
 end
-
+local cleu = CreateFrame("Frame")
+cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+cleu:SetScript("OnEvent", cleuEvent)
 
 local LootFrame = CreateFrame("Frame")
 LootFrame:RegisterEvent("START_LOOT_ROLL")
@@ -170,9 +179,6 @@ end)
 
 
 
-local cleu = CreateFrame("Frame")
-cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-cleu:SetScript("OnEvent", cleuEvent)
 
 
 local minibtn = CreateFrame("Button", nil, Minimap)
