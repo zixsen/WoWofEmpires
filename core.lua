@@ -161,7 +161,7 @@ end
 local cleu = CreateFrame("Frame")
 cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 cleu:SetScript("OnEvent", cleuEvent)
-
+local itemSoundHandle = 1
 local LootFrame = CreateFrame("Frame")
 LootFrame:RegisterEvent("START_LOOT_ROLL")
 LootFrame:SetScript("OnEvent", function(_, _, id)
@@ -171,7 +171,8 @@ local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
 itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
     GetItemInfo(name)
 	if itemEquipLoc == "INVTYPE_FINGER" then
-	EmpirePlay("welkenring.ogg")
+	StopSound(itemSoundHandle)
+	_,itemSoundHandle = EmpirePlay("welkenring.ogg")
 	else
 	EmpirePlay("Sopahit.ogg")
 	end
