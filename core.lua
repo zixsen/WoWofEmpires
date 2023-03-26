@@ -127,7 +127,6 @@ raiseframe:SetScript("OnEvent", RaiseEvent)
 
 local function cleuEvent(self, event)
 local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType = CombatLogGetCurrentEventInfo()
-print(subevent)
 
 local targetName = UnitName("target") or "noTarget"
 if subevent == "SPELL_AURA_REFRESH" and spellName == "Mind Control" and destName == playerName then
