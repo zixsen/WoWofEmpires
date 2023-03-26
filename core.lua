@@ -127,6 +127,8 @@ raiseframe:SetScript("OnEvent", RaiseEvent)
 
 local function cleuEvent(self, event)
 local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType = CombatLogGetCurrentEventInfo()
+print(subevent)
+
 local targetName = UnitName("target") or "noTarget"
 if subevent == "SPELL_AURA_REFRESH" and spellName == "Mind Control" and destName == playerName then
 EmpirePlay("Ingemar-Franko.mp3")
@@ -345,7 +347,7 @@ displayList[i].str = displayList[i].str:gsub("_", " ")
 displayList[i].str = displayList[i].str:gsub("-", " ")
 end
 end
-
+local lastFiveSounds = {}
 
 for i = 1,#events do
 f:RegisterEvent(events[i])
@@ -363,8 +365,10 @@ end
 	if (eventCheck == true) then
 		if StringToSound[tostring(string.lower(text))] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(string.lower(text))]) end
 		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(""..IntToSound[tonumber(text)]) end
-
-		
+if #lastFiveSounds > 4 then
+table.remove(lastFiveSounds,1)
+end
+table.insert(lastFiveSounds,currentHandle)
 	end
 end)
 
@@ -383,10 +387,25 @@ scrollFrame:SetScrollChild(scrollChild)
 scrollChild:SetWidth(msgFrame:GetWidth()-18)
 scrollChild:SetHeight(1) 
 
-local footer = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormalLarge")
-footer:SetPoint("BOTTOM",0,10)
-footer:SetText("Right-click minimap button to stop sound.")
+local footer = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
+footer:SetPoint("BOTTOMLEFT",5,22)
+footer:SetText("Volume:")
+local footer2 = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
+footer2:SetPoint("BOTTOMRIGHT",-7,7)
+footer2:SetText("Right-click minimap\nbutton to stop\nlast sounds.")
 
+
+local slider1 = CreateFrame("Slider", nil, msgFrame, "OptionsSliderTemplate")
+local footerwidth = footer:GetStringWidth()
+slider1:SetPoint("BOTTOMLEFT", footerwidth+15,18)
+slider1:SetMinMaxValues(0,1)
+local VolumeValue = tonumber(GetCVar("Sound_DialogVolume"))
+slider1:SetValue(VolumeValue)
+slider1:SetValueStep(0.01)
+slider1:SetObeyStepOnDrag(true)
+slider1:SetScript("OnValueChanged", function(self,value,userInput)
+tonumber(SetCVar("Sound_DialogVolume",value))
+end)
 minibtn:SetScript("OnClick", function(self,button)
 if button == "LeftButton" then
 BuildDisplayList()
@@ -443,10 +462,10 @@ minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Green.png")
 
 msgFrame:Show() end
 end
-if button == "RightButton" then
-
-StopSound(currentHandle,500)
-
+if button == "RightButton" and currentHandle ~= nil then
+for i = 1,#lastFiveSounds do
+StopSound(lastFiveSounds[i],500)
+end
 end
 end)
 local levelup = CreateFrame("Frame")
