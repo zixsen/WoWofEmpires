@@ -1,3 +1,27 @@
+WoWofEmpires = {}
+local frame = CreateFrame("Frame")
+
+-- trigger event with /reloadui or /rl
+frame:RegisterEvent("PLAYER_LOGIN")
+
+frame:SetScript("OnEvent", function(this, event, ...)
+    WoWofEmpires[event](WoWofEmpires, ...)
+end)
+
+function WoWofEmpires:PLAYER_LOGIN()
+
+       if not WoWofEmpiresDB then
+	   WoWofEmpiresDB = {
+	   disabledList = {
+	   
+	   },
+	   }
+	   
+    end
+end
+
+
+
 
 
 local soundFolder = "Interface\\AddOns\\WoWofEmpires\\sound\\"
@@ -5,7 +29,6 @@ local textureFolder = "Interface\\AddOns\\WoWofEmpires\\texture\\"
 function EmpirePlay(sound)
 return PlaySoundFile(soundFolder..""..sound,"Dialog")
 end
-gSoundFolder = soundFolder
 local events = {"CHAT_MSG_YELL","CHAT_MSG_SAY","CHAT_MSG_PARTY","CHAT_MSG_WHISPER","CHAT_MSG_PARTY_LEADER","CHAT_MSG_GUILD","CHAT_MSG_RAID","CHAT_MSG_RAID_LEADER","CHAT_MSG_EMOTE"}
 local playerName = UnitName("player")
 local IntToSound = {
@@ -75,9 +98,9 @@ local TEH_SQUAD = {
 ["Moffegreven"] = true,
 }
 local listPopulated = false
-local displayList = {};	
- 
- 
+local displayList = {}
+
+
 
  --YOINKED sorted pairs function ez4me
 local function spairs(t, order)
@@ -174,7 +197,7 @@ itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
 	if itemEquipLoc == "INVTYPE_FINGER" then
 	StopSound(itemSoundHandle)
 	_,itemSoundHandle = EmpirePlay("welkenring.ogg")
-	else
+	elseif itemRarity > 2 then
 	EmpirePlay("Sopahit.ogg")
 	end
 end)
@@ -361,7 +384,7 @@ eventCheck = true
 end
 end
 
-	if (eventCheck == true) then
+	if (eventCheck == true and not (WoWofEmpiresDB.disabledList[text] or WoWofEmpiresDB.disabledList[tonumber(text)])) then
 		if StringToSound[tostring(string.lower(text))] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(string.lower(text))]) end
 		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(""..IntToSound[tonumber(text)]) end
 if #lastFiveSounds > 4 then
@@ -417,18 +440,65 @@ if listPopulated == false then
 for i = 1,#displayList do
 
 if displayList[i].id ~= "" then
-playbtn = CreateFrame("Button",nil,scrollChild,"UIDropDownMenuButtonTemplate")
+
+--if WoWofEmpiresDB.disabledList[displayList[i].id] == true then
+local playbtn = CreateFrame("Button",nil,scrollChild)
+if WoWofEmpiresDB.disabledList[displayList[i].id] ~= true then
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+else
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
+end
+playbtn:RegisterForClicks("AnyUp")
 playbtn:SetPoint("LEFT")
-playbtn:SetSize(10,10)
+playbtn:SetSize(14,14)
 playbtn:SetPoint("TOPLEFT",0,0-(i*10))
 playbtn:SetScript("OnClick", function(self,button)
+if button == "RightButton" then
+if WoWofEmpiresDB.disabledList[displayList[i].id] ~= true then
+WoWofEmpiresDB.disabledList[displayList[i].id] = true
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
 
-if UnitInParty("player") then
+else
+WoWofEmpiresDB.disabledList[displayList[i].id] = nil
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+
+end
+
+else
+if WoWofEmpiresDB.disabledList[displayList[i].id] ~= true then
+if UnitInParty("player")  then
 SendChatMessage(displayList[i].id ,"PARTY");
 else
 SendChatMessage(displayList[i].id ,"SAY");
 end
+end
+
+end
 end)
+--else
+--local playbtn = CreateFrame("Button",nil,scrollChild)
+--playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
+--playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
+--playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+--playbtn:RegisterForClicks("AnyUp")
+--playbtn:SetPoint("LEFT")
+--playbtn:SetSize(14,14)
+--playbtn:SetPoint("TOPLEFT",0,0-(i*10))
+--playbtn:SetScript("OnClick", function(self,button)
+
+
+--end)
+--end
+--playbtn = CreateFrame("Button",nil,scrollChild,"UIDropDownMenuButtonTemplate")
+
 end
 local body = scrollChild:CreateFontString("ARTWORK", nil, "GameFontNormalSmall")
 body:SetPoint("TOP", 0, 0)

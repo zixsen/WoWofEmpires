@@ -1,3 +1,4 @@
 ## Interface: 100002
 ## Title: WoWofEmpires
+## SavedVariables: WoWofEmpiresDB
 core.lua
