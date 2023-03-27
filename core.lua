@@ -91,6 +91,10 @@ local StringToSound = {
 ["whaat"] = "whaaat.ogg",
 ["whatsup"] = "wowwowWhatsUp.ogg",
 ["run"] = "run.ogg",
+["whyrun"] = "Why are you running.ogg",
+["maths"] = "Quick maths.ogg",
+["skrra"] = "Skrra.ogg",
+["stats"] = "Check the statistacs.ogg",
 }
 
 
