@@ -1,6 +1,5 @@
 WoWofEmpires = {}
 local frame = CreateFrame("Frame")
-
 -- trigger event with /reloadui or /rl
 frame:RegisterEvent("PLAYER_LOGIN")
 
@@ -16,6 +15,9 @@ function WoWofEmpires:PLAYER_LOGIN()
 	   
 	   },
 	   }
+	   WoWofEmpiresDB.vendorGrey = false
+	   WoWofEmpiresDB.repair = false
+	   WoWofEmpiresDB.autoInv = false
 	   
     end
 end
@@ -125,6 +127,71 @@ local function spairs(t, order)
         end
     end
 end
+
+
+-- When the frame is shown, reset the update timer
+
+
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("MERCHANT_SHOW")
+f:SetScript("OnEvent", function()
+if WoWofEmpiresDB.vendorGrey == true then
+local totPrice = 0
+local totItems = 0
+local ilinkstr = ""
+for b = 0,4 do 
+for s = 0,GetContainerNumSlots(b) do
+local ilink = GetContainerItemLink(b, s)
+if ilink ~= nil then
+local _,_,qual, _,_,_,_,_,_,_,price = GetItemInfo(ilink)
+if qual == 0 then
+UseContainerItem(b,s)
+totPrice = totPrice+price
+totItems = totItems+1
+end
+end
+end
+end
+if totPrice > 0 then print("Sold "..totItems.."x item(s) for: "..GetCoinTextureString(totPrice)) end
+end
+if WoWofEmpiresDB.repair and CanMerchantRepair() then
+local repairAllCost, canRepair = GetRepairAllCost()
+if canRepair then
+RepairAllItems()
+print("Repaired all items for: "..GetCoinTextureString(repairAllCost))
+end
+end
+end)
+
+
+local f = CreateFrame("Frame")
+local function IsFriend(name)
+for i = 1,C_FriendList.GetNumFriends() do
+local friendInfo = C_FriendList.GetFriendInfoByIndex(i)
+if friendInfo.name == name then return true
+else
+return false
+end
+end
+end
+f:RegisterEvent("PARTY_INVITE_REQUEST")
+f:SetScript("OnEvent", function(self,event,name)
+if IsFriend(name) and WoWofEmpiresDB.autoInv then
+for i = 1,STATICPOPUP_NUMDIALOGS do
+local staticpopup = _G["StaticPopup"..i]
+if staticpopup:IsVisible() and staticpopup.which == "PARTY_INVITE" then
+StaticPopup_OnClick(staticpopup, 1)
+end
+end
+end
+
+
+end)
+
+
+
+
 local function DeathSound(int)
 if int == nil then
 local i = math.random(5)
@@ -191,13 +258,14 @@ LootFrame:RegisterEvent("START_LOOT_ROLL")
 LootFrame:SetScript("OnEvent", function(_, _, id)
 if not id then return end
 local texture, name, count, quality = GetLootRollItemInfo(id)
+local rollLink = GetLootRollItemLink(id)
 local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
 itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
-    GetItemInfo(name)
+    GetItemInfo(rollLink)
 	if itemEquipLoc == "INVTYPE_FINGER" then
 	StopSound(itemSoundHandle)
 	_,itemSoundHandle = EmpirePlay("welkenring.ogg")
-	elseif itemRarity > 2 then
+	elseif quality > 2 then
 	EmpirePlay("Sopahit.ogg")
 	end
 end)
@@ -274,7 +342,6 @@ end)
 ]]--
 
 
-
 local myIconPos = 0
  
 local function UpdateMapBtn()
@@ -317,7 +384,7 @@ insets = { left = 1, right = 1, top = 1, bottom = 1 },
 msgFrame:SetWidth(350)
 msgFrame:SetHeight(400)
 msgFrame:SetBackdrop(backdropInfo);
-msgFrame:SetBackdropColor(255/255,240/255,179/255,0.4);
+msgFrame:SetBackdropColor(255/255,240/255,179/255,0.7);
 msgFrame:SetBackdropBorderColor(0.1,0.1,0.1,1);
 msgFrame:SetMovable(true);
 msgFrame:EnableMouse(true);
@@ -333,7 +400,7 @@ msgFrame.text:SetJustifyH("LEFT")
 msgFrame.text:SetJustifyV("TOP")
 msgFrame.text:SetPoint("TOPLEFT",10,-10)
 msgFrame.close = CreateFrame("Button",nil,msgFrame,"UIPanelCloseButton");
-msgFrame.close:SetPoint("TOPLEFT",0,3);
+msgFrame.close:SetPoint("TOPRIGHT",5,25);
 msgFrame.close:SetScript("OnClick",function(self,button,down) msgFrame:Hide()
 minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
 minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
@@ -341,7 +408,30 @@ minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
  end);
 msgFrame:Hide()
 
+local frame = CreateFrame("Frame")
+local ONUPDATE_INTERVAL = 0.05
+local TimeSinceLastUpdate = 0
+frame:SetScript("OnUpdate", function(self, elapsed)
+TimeSinceLastUpdate = TimeSinceLastUpdate + elapsed
+if TimeSinceLastUpdate >= ONUPDATE_INTERVAL then
+if msgFrame:IsVisible() then
 
+if (TimeSinceLastUpdate*1000) < 350 then
+msgFrame:SetWidth(TimeSinceLastUpdate*1000)
+end
+if (TimeSinceLastUpdate*1000) < 400 then
+msgFrame:SetHeight(TimeSinceLastUpdate*1000)
+end
+end
+end
+end)
+
+
+msgFrame:SetScript("OnShow", function(self)
+TimeSinceLastUpdate = 0
+msgFrame:SetWidth(1)
+msgFrame:SetHeight(1)
+end)
 local f = CreateFrame("Frame")
 
 
@@ -403,19 +493,90 @@ title:SetText("WoWofEmpires")
 local scrollFrame = CreateFrame("ScrollFrame", nil, msgFrame, "UIPanelScrollFrameTemplate")
 scrollFrame:SetPoint("TOPLEFT", 3, -30)
 scrollFrame:SetPoint("BOTTOMRIGHT", -27, 44)
-
+local scrollFrame2 = CreateFrame("ScrollFrame", nil, msgFrame, "UIPanelScrollFrameTemplate")
+scrollFrame2:SetPoint("TOPLEFT", 3, -30)
+scrollFrame2:SetPoint("BOTTOMRIGHT", -27, 44)
+scrollFrame2:Hide()
 local scrollChild = CreateFrame("Frame")
 scrollFrame:SetScrollChild(scrollChild)
 scrollChild:SetWidth(msgFrame:GetWidth()-18)
 scrollChild:SetHeight(1) 
 
+local scrollChild2 = CreateFrame("Frame")
+scrollFrame2:SetScrollChild(scrollChild2)
+scrollChild2:SetWidth(msgFrame:GetWidth()-18)
+scrollChild2:SetHeight(1) 
+
+-- for i = 1,45 do 
+-- local body2 = scrollChild2:CreateFontString("ARTWORK", nil, "GameFontNormalSmall")
+-- body2:SetPoint("TOPLEFT", 5, 1-i*10)
+-- body2:SetJustifyH("LEFT")
+-- body2:SetJustifyV("TOP")
+-- body2:SetTextColor(1,1,1,1)
+-- body2:SetText("aa"..i)
+-- end
+local cbVendorGrey = CreateFrame("CheckButton", "vendorgrey_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
+cbVendorGrey:SetSize(20,20)
+cbVendorGrey:SetPoint("TOPLEFT")
+vendorgrey_CBnameText:SetText("Auto vendor greys");
+
+cbVendorGrey:SetScript("OnClick", 
+  function()
+  WoWofEmpiresDB.vendorGrey = cbVendorGrey:GetChecked() 
+  end)
+  
+  local cbRepair = CreateFrame("CheckButton", "repair_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
+  cbRepair:SetSize(20,20)
+cbRepair:SetPoint("TOPLEFT",0,-16*1)
+repair_CBnameText:SetText("Auto repair");
+
+cbRepair:SetScript("OnClick", 
+  function()
+  WoWofEmpiresDB.repair = cbRepair:GetChecked() 
+  end)
+  
+    local cbAutoInv = CreateFrame("CheckButton", "autoinv_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
+  cbAutoInv:SetSize(20,20)
+cbAutoInv:SetPoint("TOPLEFT",0,-16*2)
+autoinv_CBnameText:SetText("Auto-Accept group (from friends)");
+
+cbAutoInv:SetScript("OnClick", 
+  function()
+  WoWofEmpiresDB.autoInv = cbAutoInv:GetChecked() 
+  end)
+ 
+ 
+  
 local footer = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
 footer:SetPoint("BOTTOMLEFT",5,22)
 footer:SetText("Volume:")
 local footer2 = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
 footer2:SetPoint("BOTTOMRIGHT",-7,7)
 footer2:SetText("Right-click minimap\nbutton to stop\nlast sounds.")
+local header1 = CreateFrame("BUTTON",nil,msgFrame,"TabButtonTemplate")
+header1:SetPoint("TOPLEFT",0,33)
+--PanelTemplates_TabResize(2, header1, 25, 25)
 
+header1:SetText("Main")
+PanelTemplates_TabResize(header1, 0,75)
+header1:SetScript("OnClick", function(self,button)
+scrollFrame:Show()
+scrollFrame2:Hide()
+end)
+
+local header2 = CreateFrame("BUTTON",nil,msgFrame,"TabButtonTemplate")
+header2:SetPoint("TOPLEFT",75,33)
+--PanelTemplates_TabResize(2, header2, 25, 25)
+
+header2:SetText("QoL")
+PanelTemplates_TabResize(header2, 0,75)
+header2:SetScript("OnClick", function(self,button)
+scrollFrame:Hide()
+cbVendorGrey:SetChecked(WoWofEmpiresDB.vendorGrey) 
+cbRepair:SetChecked(WoWofEmpiresDB.repair) 
+cbAutoInv:SetChecked(WoWofEmpiresDB.autoInv) 
+scrollFrame2:Show()
+end)
 
 local slider1 = CreateFrame("Slider", nil, msgFrame, "OptionsSliderTemplate")
 local footerwidth = footer:GetStringWidth()
