@@ -416,11 +416,15 @@ TimeSinceLastUpdate = TimeSinceLastUpdate + elapsed
 if TimeSinceLastUpdate >= ONUPDATE_INTERVAL then
 if msgFrame:IsVisible() then
 
-if (TimeSinceLastUpdate*1000) < 350 then
+if msgFrame:GetWidth() < 350 then
 msgFrame:SetWidth(TimeSinceLastUpdate*1000)
+else
+msgFrame:SetWidth(350)
 end
-if (TimeSinceLastUpdate*1000) < 400 then
+if msgFrame:GetHeight() < 400 then
 msgFrame:SetHeight(TimeSinceLastUpdate*1000)
+else
+msgFrame:SetHeight(400)
 end
 end
 end
