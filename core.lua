@@ -388,6 +388,7 @@ msgFrame:SetBackdropColor(255/255,240/255,179/255,0.7);
 msgFrame:SetBackdropBorderColor(0.1,0.1,0.1,1);
 msgFrame:SetMovable(true);
 msgFrame:EnableMouse(true);
+
 msgFrame:SetMovable(true);
 msgFrame:SetToplevel(true);
 msgFrame:SetClampedToScreen(true);
@@ -406,6 +407,20 @@ minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
 minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
 minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
  end);
+ msgFrame.close:EnableKeyboard(true);
+msgFrame.close:SetScript("OnKeyDown",function(self,button,down) 
+if button == "ESCAPE" then
+msgFrame.close:SetPropagateKeyboardInput(false)
+msgFrame:Hide()
+minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
+minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
+minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+else
+ msgFrame.close:SetPropagateKeyboardInput(true)
+end
+ end);
+ 
+ 
 msgFrame:Hide()
 
 local frame = CreateFrame("Frame")
