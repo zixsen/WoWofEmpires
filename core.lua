@@ -18,8 +18,11 @@ function WoWofEmpires:PLAYER_LOGIN()
 	   WoWofEmpiresDB.vendorGrey = false
 	   WoWofEmpiresDB.repair = false
 	   WoWofEmpiresDB.autoInv = false
+	   WoWofEmpiresDB.Bagspace = false
+
 	   
     end
+
 end
 
 
@@ -179,9 +182,23 @@ return false
 end
 end
 end
+
+function IsBnetFriend(name)
+for i = 1,BNGetNumFriends() do
+local friendInfo = select(5,BNGetFriendInfo(i))
+print(friendInfo)
+if friendInfo == name then return true
+else
+return false
+end
+end
+end
+
+
 f:RegisterEvent("PARTY_INVITE_REQUEST")
 f:SetScript("OnEvent", function(self,event,name)
-if IsFriend(name) and WoWofEmpiresDB.autoInv then
+C_FriendList.ShowFriends()
+if (IsFriend(name) or IsBnetFriend(name)) and WoWofEmpiresDB.autoInv then
 for i = 1,STATICPOPUP_NUMDIALOGS do
 local staticpopup = _G["StaticPopup"..i]
 if staticpopup:IsVisible() and staticpopup.which == "PARTY_INVITE" then
@@ -193,6 +210,24 @@ end
 
 end)
 
+local f = CreateFrame("Frame")
+f.shouldOOR = true
+f:RegisterEvent("UI_ERROR_MESSAGE")
+f:SetScript("OnEvent", function(self,event,id,str)
+if id == 363 and tonumber((GetCVar("Sound_EnableErrorSpeech"))) > 0 then
+SetCVar("Sound_EnableErrorSpeech","0")
+if str == "Out of range." and f.shouldOOR then
+local i = math.random(1,2)
+EmpirePlay("Too_far_away"..i..".ogg")
+f.shouldOOR = false
+C_Timer.After(1, function()
+f.shouldOOR = true 
+SetCVar("Sound_EnableErrorSpeech","1")
+end)
+end
+
+end
+end)
 
 
 
@@ -221,7 +256,6 @@ raiseframe:SetScript("OnEvent", RaiseEvent)
 
 local function cleuEvent(self, event)
 local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType = CombatLogGetCurrentEventInfo()
-
 local targetName = UnitName("target") or "noTarget"
 if subevent == "SPELL_AURA_REFRESH" and spellName == "Mind Control" and destName == playerName then
 EmpirePlay("Ingemar-Franko.mp3")
@@ -230,6 +264,11 @@ if subevent == "SPELL_AURA_REFRESH" and (spellName == "Web") and destName == tar
 EmpirePlay("spindelnat.ogg")
 end
 
+if subevent == "SPELL_AURA_BROKEN_SPELL" then
+local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType,extraSpellId,extraSpellName,extraSchool,auraType = CombatLogGetCurrentEventInfo()
+print(subevent)
+print(spellName.." broken by "..extraSpellName)
+end
 
 
 if subevent == "SPELL_CAST_SUCCESS" then
@@ -567,8 +606,56 @@ cbAutoInv:SetScript("OnClick",
   function()
   WoWofEmpiresDB.autoInv = cbAutoInv:GetChecked() 
   end)
- 
- 
+  
+  
+  local bagspaceframe = CreateFrame("Frame")
+  bagspaceframe:SetFrameStrata("TOOLTIP")
+ local bagspacetext = bagspaceframe:CreateFontString("OVERLAY",nil,"GameFontNormal")
+ bagspacetext:SetShadowColor(0, 0, 0,1)
+bagspacetext:SetShadowOffset(2, -2)
+bagspacetext:SetScale(1.2)
+ bagspacetext:SetPoint("CENTER",MainMenuBarBackpackButton,0,-3)
+--bagspacetext:SetTextColor(1,1,1,1)
+local f = CreateFrame("Frame")
+f:RegisterEvent("BAG_UPDATE")
+f:SetScript("OnEvent",function()
+local bgspace = 0
+for i = 0,4 do
+local numberOfFreeSlots,bagType = GetContainerNumFreeSlots(i)
+local bagName = GetBagName(i)
+if bagName ~= nil and not (bagName:find("Soul") or bagName:find("Felcloth")) then
+bgspace = bgspace + numberOfFreeSlots
+end
+end
+if bgspace <= 3 then
+bagspacetext:SetTextColor(1,0,0,1)
+else
+bagspacetext:SetTextColor(1,1,1,1)
+end
+bagspacetext:SetText("["..bgspace.."]")
+  if WoWofEmpiresDB ~= nil and WoWofEmpiresDB.Bagspace then
+  bagspacetext:Show()
+  else
+  bagspacetext:Hide()
+  end
+  
+end)
+
+local cbBagspace = CreateFrame("CheckButton", "Bagspace_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
+cbBagspace:SetSize(20,20)
+cbBagspace:SetPoint("TOPLEFT",0,-16*3)
+Bagspace_CBnameText:SetText("Show bagspace on first bag.");
+
+cbBagspace:SetScript("OnClick", 
+  function()
+  WoWofEmpiresDB.Bagspace = cbBagspace:GetChecked()
+  if WoWofEmpiresDB.Bagspace then
+  bagspacetext:Show()
+  else
+  bagspacetext:Hide()
+  end
+  end)
+
   
 local footer = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
 footer:SetPoint("BOTTOMLEFT",5,22)
@@ -598,6 +685,7 @@ scrollFrame:Hide()
 cbVendorGrey:SetChecked(WoWofEmpiresDB.vendorGrey) 
 cbRepair:SetChecked(WoWofEmpiresDB.repair) 
 cbAutoInv:SetChecked(WoWofEmpiresDB.autoInv) 
+cbBagspace:SetChecked(WoWofEmpiresDB.Bagspace) 
 scrollFrame2:Show()
 end)
 
