@@ -212,13 +212,15 @@ end)
 
 local f = CreateFrame("Frame")
 f.shouldOOR = true
+f.counter = 0
 f:RegisterEvent("UI_ERROR_MESSAGE")
 f:SetScript("OnEvent", function(self,event,id,str)
 if id == 363 and tonumber((GetCVar("Sound_EnableErrorSpeech"))) > 0 then
 SetCVar("Sound_EnableErrorSpeech","0")
 if str == "Out of range." and f.shouldOOR then
-local i = math.random(1,2)
-EmpirePlay("Too_far_away"..i..".ogg")
+if f.counter > 1 then f.counter = 0 end
+f.counter = f.counter + 1
+EmpirePlay("Too_far_away"..f.counter..".ogg")
 f.shouldOOR = false
 C_Timer.After(1, function()
 f.shouldOOR = true 
