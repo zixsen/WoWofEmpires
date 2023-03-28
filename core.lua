@@ -268,8 +268,7 @@ end
 
 if subevent == "SPELL_AURA_BROKEN_SPELL" then
 local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType,extraSpellId,extraSpellName,extraSchool,auraType = CombatLogGetCurrentEventInfo()
-print(subevent)
-print(spellName.." broken by "..extraSpellName)
+print(spellName.." broken by: "..sourceName.." on: "..destName)
 end
 
 
