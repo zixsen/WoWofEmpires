@@ -259,11 +259,13 @@ raiseframe:SetScript("OnEvent", RaiseEvent)
 local function cleuEvent(self, event)
 local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType = CombatLogGetCurrentEventInfo()
 local targetName = UnitName("target") or "noTarget"
-if subevent == "SPELL_AURA_REFRESH" and spellName == "Mind Control" and destName == playerName then
+if subevent == "SPELL_AURA_APPLIED" and spellName == "Mind Control" and destName == playerName then
 EmpirePlay("Ingemar-Franko.mp3")
 end
-if subevent == "SPELL_AURA_REFRESH" and (spellName == "Web") and destName == targetName then
+
+if subevent == "SPELL_AURA_APPLIED" and (spellName == "Web" and destName == targetName) then
 EmpirePlay("spindelnat.ogg")
+--print(targetName)
 end
 
 if subevent == "SPELL_AURA_BROKEN_SPELL" then
