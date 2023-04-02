@@ -31,9 +31,21 @@ end
 
 local soundFolder = "Interface\\AddOns\\WoWofEmpires\\sound\\"
 local textureFolder = "Interface\\AddOns\\WoWofEmpires\\texture\\"
+
 function EmpirePlay(sound)
 return PlaySoundFile(soundFolder..""..sound,"Dialog")
 end
+function EmpireSay(text)
+return C_VoiceChat.SpeakText(0, text, Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+end
+function EmpireWhisper(message)
+for i = 1,C_FriendList.GetNumWhoResults() do 
+local name = C_FriendList.GetWhoInfo(i).fullName
+SendChatMessage(message, "WHISPER", nil, name)
+end
+end
+
+
 local events = {"CHAT_MSG_YELL","CHAT_MSG_SAY","CHAT_MSG_PARTY","CHAT_MSG_WHISPER","CHAT_MSG_PARTY_LEADER","CHAT_MSG_GUILD","CHAT_MSG_RAID","CHAT_MSG_RAID_LEADER","CHAT_MSG_EMOTE"}
 local playerName = UnitName("player")
 local IntToSound = {
@@ -135,7 +147,14 @@ local function spairs(t, order)
     end
 end
 
-
+function tContain(table, element)
+  for _, value in pairs(table) do
+    if value == element then
+      return true
+    end
+  end
+  return false
+end
 -- When the frame is shown, reset the update timer
 
 
@@ -278,7 +297,7 @@ if subevent == "SPELL_CAST_SUCCESS" then
 if spellName == "Death Coil" and destName == playerName then
 EmpirePlay("vemvare.ogg")
 end
-if spellName == "Blink" and sourceName == playerName then
+if spellName == "Blink" and TEH_SQUAD[sourceName] then
 local i = math.random(1,10)
 if i == 1 then
 EmpirePlay("blink.ogg")
@@ -530,7 +549,9 @@ for i = 1,#events do
 f:RegisterEvent(events[i])
 end
 local currentHandle
-f:SetScript("OnEvent", function(self, event, text)
+f:SetScript("OnEvent", function(self, event, text,sender)
+local fplayerName = GetUnitName("player")
+local fplayerName = playerName.."-"..GetRealmName()
 local eventCheck = false
 currentHandle = nil
 for i = 1,#events do
@@ -538,7 +559,21 @@ if event == events[i] then
 eventCheck = true
 end
 end
+if eventCheck == true then
+local ttsSTR = string.sub(text,1,4)
+if ttsSTR == "tts:" then
+local newText = text:sub(string.len(ttsSTR))
+EmpireSay(newText)
+end
 
+
+local spamSTR = string.sub(text,1,5)
+if spamSTR == "spam:" and sender == fplayerName then
+local newText = text:sub(string.len(spamSTR))
+EmpireWhisper(newText)
+end
+
+end
 	if (eventCheck == true and not (WoWofEmpiresDB.disabledList[text] or WoWofEmpiresDB.disabledList[tonumber(text)])) then
 		if StringToSound[tostring(string.lower(text))] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(string.lower(text))]) end
 		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(""..IntToSound[tonumber(text)]) end
@@ -825,6 +860,24 @@ end)
 
 
 
+local editFrame = CreateFrame("EditBox", nil, ContainerFrame1, "BagSearchBoxTemplate");
+editFrame:SetPoint("TOP", ContainerFrame1, "TOP");
+editFrame:SetWidth(126);
+editFrame:SetHeight(18);
+editFrame:SetMaxLetters(15);
+hooksecurefunc("ContainerFrame_Update", function( self )
+	if self:GetID() == 0 then
+		editFrame:SetParent(self)
+		editFrame:SetPoint("TOPLEFT", self, "TOPLEFT", 55, -29)
+		editFrame.anchorBag = self
+		editFrame:Show()
+	elseif editFrame.anchorBag == self then
+		editFrame:ClearAllPoints()
+		editFrame:Hide()
+		editFrame.anchorBag = nil
+	end
+end)
+
 
 --[[ DEJV AI KÅÅD ]]--
 -- First, we define a function that will check if our own character's health
@@ -849,7 +902,7 @@ end
 -- Next, we create an event listener that will call our checkHealth function
 -- whenever our own character's health changes.
 local frame = CreateFrame("FRAME")
-frame:RegisterEvent("UNIT_HEALTH")
+frame:RegisterEvent("UNIT_HEALTH_FREQUENT")
 frame:SetScript("OnEvent", function(self, event, unit)
 if unit == "player" then
   checkHealth()
