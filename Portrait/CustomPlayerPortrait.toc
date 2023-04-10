@@ -1,0 +1,10 @@
+﻿## Interface: 60200
+## Title: Custom Player Portrait
+## Notes: Replace your player portrait with custom images.
+## Author: Felforit
+## Version: 1.1
+## DefaultState: Enabled
+## SavedVariablesPerCharacter: savedPortraitIndex,PortraitKungarna
+
+Main.lua
+Main.xml

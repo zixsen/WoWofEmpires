@@ -1,0 +1,118 @@
+﻿Custom Player Portrait
+======================
+
+Replace your player portrait with custom images.
+
+The selected portrait is saved per character.
+
+
+Table of Contents
+-----------------
+
+1. Switching between portraits
+2. Editing portrait images
+3. Adding more portraits
+4. Troublshooting
+4.1 Green portrait image
+4.2 Square portrait image
+5. General help
+5.1 Where is the game installed?
+
+
+1. Switching between portraits
+==============================
+
+With the mouse pointer above your player portrait--use the Scroll Wheel
+to cycle through all the portraits--including the normal portrait.
+
+
+2. Editing portrait images
+==========================
+
+Images must be saved in the 32-bit TGA format.  The default images have a black
+circle which your new portrait should replace.  The area surrounding the circle must be
+transparent--otherwise the portrait will get a square shape.
+
+Images must be 64 by 64 pixels.
+
+
+Open the default images in a suitable image editor--replace the black circle with
+whatever you want to have as your portrait.  Save the image.  Use the command /reload in
+the game to load the updated images.  Just make sure that they are saved in the same format
+and that the area surrounding the circle region remains transparent--otherwise you'll end up
+seeing  a square portrait image.
+
+
+The default images are located in the folder \CustomPlayerPortrait\Portraits:
+* 1.tga
+* 2.tga
+* 3.tga
+* 4.tga
+* 5.tga
+
+
+3. Adding more portraits
+========================
+
+The AddOn will handle up to 5 images by default.  To increase or
+decrease this number--open the Lua file and edit the number by the
+variable called highestPortraitIndex.
+
+File:
+\CustomPlayerPortrait\Main.lua
+
+Choose to open the file in a plain text editor such as Notepad (Windows).
+
+Variable:
+highestPortraitIndex = 5
+
+* Make sure this number corresponds to the number of images in the \Portraits folder.
+* Make sure there are no gaps in the numbering of the image files.
+
+Important: You have to close the game after adding more files.
+
+
+4. Troubleshooting
+==================
+
+4.1 Seeing green portrait image
+-------------------------------
+
+Possible reasons:
+* The image file was not found--possibly due to a gap in the numbering--or if the
+highestPortraitIndex doesn't match the number of images in the \Portraits folder.
+* The image was saved in a different format that was not supported.
+
+Review the image requirements:
+* Images must be 64 by 64 pixels
+* Images must be stored in the 32-bit TGA format (RGBA)
+
+4.2 Seeing square portrait image
+--------------------------------
+
+Transparency data was not saved--or not applied to the image when it was saved.
+
+Either use the example images--which have a black circle at the
+center--and fill the black region with your image.  The image editing
+software must handle transparency.
+
+Review the image requirements:
+* Images must be stored in the 32-bit TGA format (RGBA)
+
+
+5. General help
+===============
+
+5.1 Where is the game installed?
+--------------------------------
+
+Here's one method to find out:
+1. Start the Battle.net Launcher
+2. Select: World of Warcraft
+3. Select: Options
+4. Select: Game Settings
+(A new window opens.)
+5. Select: Game Install/Update
+6. Note the path under FOLDER USED FOR GAMEPLAY.
+
+Once you've found the location--enter the "Interface" and "AddOns" folder.

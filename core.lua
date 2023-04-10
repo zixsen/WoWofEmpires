@@ -41,7 +41,9 @@ end
 function EmpireWhisper(message)
 for i = 1,C_FriendList.GetNumWhoResults() do 
 local name = C_FriendList.GetWhoInfo(i).fullName
+if name ~= UnitName("player") then
 SendChatMessage(message, "WHISPER", nil, name)
+end
 end
 end
 
@@ -110,6 +112,8 @@ local StringToSound = {
 ["maths"] = "Quick maths.ogg",
 ["skrra"] = "Skrra.ogg",
 ["stats"] = "Check the statistacs.ogg",
+["profamity"] = "Watch yo profamity.ogg",
+["durudu"] = "Durudu.ogg",
 }
 
 
@@ -205,7 +209,6 @@ end
 function IsBnetFriend(name)
 for i = 1,BNGetNumFriends() do
 local friendInfo = select(5,BNGetFriendInfo(i))
-print(friendInfo)
 if friendInfo == name then return true
 else
 return false
@@ -225,8 +228,18 @@ StaticPopup_OnClick(staticpopup, 1)
 end
 end
 end
-
-
+end)
+local f = CreateFrame("Frame")
+f:RegisterEvent("CHAT_MSG_WHISPER")
+f:SetScript("OnEvent",function(self,event,text,sender)
+local r = {}
+for word in sender:gmatch("[^-]+") do
+	    table.insert(r, word)
+	end
+local senderShort = r[1]
+if (IsFriend(senderShort) or IsBnetFriend(senderShort)) and WoWofEmpiresDB.autoInv then
+if text == "inv" then InviteUnit(sender) end
+end
 end)
 
 local f = CreateFrame("Frame")
@@ -285,6 +298,10 @@ end
 if subevent == "SPELL_AURA_APPLIED" and (spellName == "Web" and destName == targetName) then
 EmpirePlay("spindelnat.ogg")
 --print(targetName)
+
+end
+if subevent == "SPELL_AURA_APPLIED" and spellName == "Shadow Trance" and destName == playerName then
+EmpirePlay("ShadowTrance.ogg")
 end
 
 if subevent == "SPELL_AURA_BROKEN_SPELL" then
@@ -297,11 +314,14 @@ if subevent == "SPELL_CAST_SUCCESS" then
 if spellName == "Death Coil" and destName == playerName then
 EmpirePlay("vemvare.ogg")
 end
-if spellName == "Blink" and TEH_SQUAD[sourceName] then
+if spellName == "Blink" and sourceName == playerName then
+C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpires")
 local i = math.random(1,10)
 if i == 1 then
-EmpirePlay("blink.ogg")
-print("Här kan man va!")
+--EmpirePlay("blink.ogg")
+--print("Här kan man va!")
+
+C_ChatInfo.SendAddonMessage("WoWofEmpires", "blinkCastSuccess", "PARTY")
 end
 end
 end
@@ -336,6 +356,23 @@ itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
 end)
 
 
+
+ 
+local f = CreateFrame("Frame")
+f:RegisterEvent("CHAT_MSG_ADDON")
+f:SetScript("OnEvent", function(self, event, prefix,text)
+    if prefix == "WoWofEmpires" and text == "blinkCastSuccess"  then
+EmpirePlay("blink.ogg")
+print("Här kan man va!")
+end
+
+if prefix == "WoWofEmpiresKoS" and Spy ~= nil then
+if SpyPerCharDB["PlayerData"][text] == nil then
+Spy:ToggleKOSPlayer(true,text)
+end
+end
+
+end)
 
 
 
@@ -550,8 +587,6 @@ f:RegisterEvent(events[i])
 end
 local currentHandle
 f:SetScript("OnEvent", function(self, event, text,sender)
-local fplayerName = GetUnitName("player")
-local fplayerName = playerName.."-"..GetRealmName()
 local eventCheck = false
 currentHandle = nil
 for i = 1,#events do
@@ -566,15 +601,29 @@ local newText = text:sub(string.len(ttsSTR))
 EmpireSay(newText)
 end
 
-
+local fplayerName = GetUnitName("player")
+local fplayerName = playerName.."-"..GetRealmName()
 local spamSTR = string.sub(text,1,5)
 if spamSTR == "spam:" and sender == fplayerName then
 local newText = text:sub(string.len(spamSTR))
 EmpireWhisper(newText)
 end
 
+if event == "CHAT_MSG_GUILD" and text == "!kos" and sender == fplayerName and Spy ~= nil then
+local namesSent = ""
+C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpiresKoS")
+for k,v in pairs(SpyPerCharDB["PlayerData"]) do
+if v.kos == 1 then
+C_ChatInfo.SendAddonMessage("WoWofEmpiresKoS", v.name, "GUILD")
+namesSent = v.name..", "..namesSent
 end
-	if (eventCheck == true and not (WoWofEmpiresDB.disabledList[text] or WoWofEmpiresDB.disabledList[tonumber(text)])) then
+end
+print("Shared: "..namesSent.."to guild.")
+end
+
+
+end
+	if (eventCheck == true and not (WoWofEmpiresDB.disabledList[string.lower(text)] or WoWofEmpiresDB.disabledList[tonumber(text)])) then
 		if StringToSound[tostring(string.lower(text))] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(string.lower(text))]) end
 		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(""..IntToSound[tonumber(text)]) end
 if #lastFiveSounds > 4 then
@@ -908,3 +957,9 @@ if unit == "player" then
   checkHealth()
   end
 end)
+
+--print(SpyPerCharDB["PlayerData"][playerName].kos)
+-- NOTES
+-- Spy:ToggleKOSPlayer(bool, stringname)
+
+--

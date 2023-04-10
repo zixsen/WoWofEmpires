@@ -1,0 +1,18 @@
+﻿Changes 2016-07-16
+==================
+
+
+Version 1.1 - Corrections
+=========================
+
+Symptoms: Sometimes the target below the portrait would not
+show--also known as the Target of Target (ToT)--which is optionally
+available via System -> Interface settings.
+
+Cause: Taint issues that were not caught during development.
+
+
+Version 1.0 - Release
+=====================
+
+Initial version.
