@@ -38,12 +38,28 @@ end
 function EmpireSay(text)
 return C_VoiceChat.SpeakText(0, text, Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
 end
+
+
+
+local whisperList = {}
+local f = CreateFrame("Frame")
+f:RegisterEvent("CHAT_MSG_WHISPER_INFORM")
+f:SetScript("OnEvent",function(self,event,text,sender)
+local i,j =  string.find(sender,GetRealmName())
+if i ~= nil then sender = string.sub(sender,1,i-2) end
+whisperList[sender] = {lastWhisper = GetTime()}
+end)
+
+
+
 function EmpireWhisper(message)
 for i = 1,C_FriendList.GetNumWhoResults() do 
 local name = C_FriendList.GetWhoInfo(i).fullName
-if name ~= UnitName("player") then
+--if name ~= UnitName("player") then
+if whisperList[name] == nil or GetTime() - whisperList[name].lastWhisper > 10*60 then
 SendChatMessage(message, "WHISPER", nil, name)
 end
+--end
 end
 end
 
@@ -115,15 +131,21 @@ local StringToSound = {
 ["profamity"] = "Watch yo profamity.ogg",
 ["durudu"] = "Durudu.ogg",
 }
+table.sort(StringToSound, function(a, b) return tostring(a) < tostring(b) end)
 
-
-local TEH_SQUAD = {
+TEH_SQUAD = {
 ["Addons"] = true,
 ["Krasslig"] = true,
 ["Moffegreven"] = true,
+["Koettpangmos"] = true,
+["Enticed"] = true,
+["Doodoodoo"] = true,
+["Barre"] = true,
+["Bength"] = true,
 }
 local listPopulated = false
 local displayList = {}
+local displayList2 = {}
 
 
 
@@ -159,8 +181,15 @@ function tContain(table, element)
   end
   return false
 end
--- When the frame is shown, reset the update timer
 
+
+
+function inPublicParty()
+myparty = GetHomePartyInfo()
+for i = 1,#myparty do
+if TEH_SQUAD[myparty[i]] == nil then return true end
+end
+end
 
 
 local f = CreateFrame("Frame")
@@ -171,14 +200,17 @@ local totPrice = 0
 local totItems = 0
 local ilinkstr = ""
 for b = 0,4 do 
-for s = 0,GetContainerNumSlots(b) do
-local ilink = GetContainerItemLink(b, s)
+for s = 0,C_Container.GetContainerNumSlots(b) do
+--local ilink = C_Container.GetContainerItemLink(b, s)
+--local _, stackCount, _, _, _, _, ilink = C_Container.GetContainerItemInfo(b, s);
+local ilink = C_Container.GetContainerItemInfo(b, s);
 if ilink ~= nil then
-local _,_,qual, _,_,_,_,_,_,_,price = GetItemInfo(ilink)
+local _,_,qual, _,_,_,_,_,_,_,price = GetItemInfo(ilink.hyperlink)
 if qual == 0 then
-UseContainerItem(b,s)
-totPrice = totPrice+price
-totItems = totItems+1
+
+C_Container.UseContainerItem(b,s)
+totPrice = totPrice+(price*ilink.stackCount)
+totItems = totItems+(1*ilink.stackCount)
 end
 end
 end
@@ -195,7 +227,6 @@ end
 end)
 
 
-local f = CreateFrame("Frame")
 local function IsFriend(name)
 for i = 1,C_FriendList.GetNumFriends() do
 local friendInfo = C_FriendList.GetFriendInfoByIndex(i)
@@ -217,6 +248,8 @@ end
 end
 
 
+
+local f = CreateFrame("Frame")
 f:RegisterEvent("PARTY_INVITE_REQUEST")
 f:SetScript("OnEvent", function(self,event,name)
 C_FriendList.ShowFriends()
@@ -315,13 +348,16 @@ if spellName == "Death Coil" and destName == playerName then
 EmpirePlay("vemvare.ogg")
 end
 if spellName == "Blink" and sourceName == playerName then
-C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpires")
+local channel
+if UnitInParty("player") then channel = "PARTY" else channel = "SAY" end
+
 local i = math.random(1,10)
 if i == 1 then
+C_ChatInfo.SendAddonMessage("WoWofEmpires2", "blinkCastSuccess", channel)
 --EmpirePlay("blink.ogg")
 --print("Här kan man va!")
 
-C_ChatInfo.SendAddonMessage("WoWofEmpires", "blinkCastSuccess", "PARTY")
+
 end
 end
 end
@@ -360,8 +396,11 @@ end)
  
 local f = CreateFrame("Frame")
 f:RegisterEvent("CHAT_MSG_ADDON")
-f:SetScript("OnEvent", function(self, event, prefix,text)
-    if prefix == "WoWofEmpires" and text == "blinkCastSuccess"  then
+C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpires2")
+C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpiresKoS")
+
+f:SetScript("OnEvent", function(self, event, prefix,text,chan)
+if prefix == "WoWofEmpires2" and text == "blinkCastSuccess" then
 EmpirePlay("blink.ogg")
 print("Här kan man va!")
 end
@@ -559,7 +598,7 @@ local f = CreateFrame("Frame")
 
 local function BuildDisplayList()
 wipe(displayList);
-
+wipe(displayList2);
 
 	for k,v in spairs(IntToSound) do
 table.insert(displayList,{id = k,str = v})
@@ -567,8 +606,9 @@ end
 
 
 table.insert(displayList,{id = "",str = ""})
+
 for k,v in pairs(StringToSound) do
-table.insert(displayList,{id = k, str = v})
+table.insert(displayList2,{id = k, str = v})
 end
 
 for i = 1,#displayList do
@@ -579,6 +619,16 @@ local patterns = {"%.ogg","%.mp3"}
 displayList[i].str = displayList[i].str:gsub("_", " ")
 displayList[i].str = displayList[i].str:gsub("-", " ")
 end
+for i = 1,#displayList2 do
+local patterns = {"%.ogg","%.mp3"}
+ for p = 1,#patterns do
+ displayList2[i].str = displayList2[i].str:gsub(patterns[p], "")
+ end
+displayList2[i].str = displayList2[i].str:gsub("_", " ")
+displayList2[i].str = displayList2[i].str:gsub("-", " ")
+end
+table.sort(displayList2, function(a, b) return tostring(a.id) < tostring(b.id)end) 
+
 end
 local lastFiveSounds = {}
 
@@ -605,13 +655,12 @@ local fplayerName = GetUnitName("player")
 local fplayerName = playerName.."-"..GetRealmName()
 local spamSTR = string.sub(text,1,5)
 if spamSTR == "spam:" and sender == fplayerName then
-local newText = text:sub(string.len(spamSTR))
+local newText = text:sub(2+string.len(spamSTR))
 EmpireWhisper(newText)
 end
 
 if event == "CHAT_MSG_GUILD" and text == "!kos" and sender == fplayerName and Spy ~= nil then
 local namesSent = ""
-C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpiresKoS")
 for k,v in pairs(SpyPerCharDB["PlayerData"]) do
 if v.kos == 1 then
 C_ChatInfo.SendAddonMessage("WoWofEmpiresKoS", v.name, "GUILD")
@@ -646,6 +695,10 @@ local scrollFrame2 = CreateFrame("ScrollFrame", nil, msgFrame, "UIPanelScrollFra
 scrollFrame2:SetPoint("TOPLEFT", 3, -30)
 scrollFrame2:SetPoint("BOTTOMRIGHT", -27, 44)
 scrollFrame2:Hide()
+local scrollFrame3 = CreateFrame("ScrollFrame", nil, msgFrame, "UIPanelScrollFrameTemplate")
+scrollFrame3:SetPoint("TOPLEFT", 3, -30)
+scrollFrame3:SetPoint("BOTTOMRIGHT", -27, 44)
+scrollFrame3:Hide()
 local scrollChild = CreateFrame("Frame")
 scrollFrame:SetScrollChild(scrollChild)
 scrollChild:SetWidth(msgFrame:GetWidth()-18)
@@ -655,6 +708,29 @@ local scrollChild2 = CreateFrame("Frame")
 scrollFrame2:SetScrollChild(scrollChild2)
 scrollChild2:SetWidth(msgFrame:GetWidth()-18)
 scrollChild2:SetHeight(1) 
+
+local scrollChild3 = CreateFrame("Frame")
+scrollFrame3:SetScrollChild(scrollChild3)
+scrollChild3:SetWidth(msgFrame:GetWidth()-18)
+scrollChild3:SetHeight(1) 
+
+
+
+local myparty = GetHomePartyInfo()
+if myparty ~= nil then
+for i = 1,#myparty do 
+local body3 = scrollChild3:CreateFontString("ARTWORK",nil,"GameFontNormalSmall")
+body3:SetPoint("TOPLEFT", 15, 1-i*10)
+body3:SetJustifyH("LEFT")
+body3:SetJustifyV("TOP")
+body3:SetTextColor(1,1,1,1)
+body3:SetText(myparty[i])
+end
+end
+
+
+
+
 
 -- for i = 1,45 do 
 -- local body2 = scrollChild2:CreateFontString("ARTWORK", nil, "GameFontNormalSmall")
@@ -708,8 +784,8 @@ f:RegisterEvent("BAG_UPDATE")
 f:SetScript("OnEvent",function()
 local bgspace = 0
 for i = 0,4 do
-local numberOfFreeSlots,bagType = GetContainerNumFreeSlots(i)
-local bagName = GetBagName(i)
+local numberOfFreeSlots,bagType = C_Container.GetContainerNumFreeSlots(i)
+local bagName = C_Container.GetBagName(i)
 if bagName ~= nil and not (bagName:find("Soul") or bagName:find("Felcloth")) then
 bgspace = bgspace + numberOfFreeSlots
 end
@@ -759,6 +835,7 @@ PanelTemplates_TabResize(header1, 0,75)
 header1:SetScript("OnClick", function(self,button)
 scrollFrame:Show()
 scrollFrame2:Hide()
+scrollFrame3:Hide()
 end)
 
 local header2 = CreateFrame("BUTTON",nil,msgFrame,"TabButtonTemplate")
@@ -769,12 +846,26 @@ header2:SetText("QoL")
 PanelTemplates_TabResize(header2, 0,75)
 header2:SetScript("OnClick", function(self,button)
 scrollFrame:Hide()
+scrollFrame3:Hide()
 cbVendorGrey:SetChecked(WoWofEmpiresDB.vendorGrey) 
 cbRepair:SetChecked(WoWofEmpiresDB.repair) 
 cbAutoInv:SetChecked(WoWofEmpiresDB.autoInv) 
 cbBagspace:SetChecked(WoWofEmpiresDB.Bagspace) 
 scrollFrame2:Show()
 end)
+local header3 = CreateFrame("BUTTON",nil,msgFrame,"TabButtonTemplate")
+header3:SetPoint("TOPLEFT",75+75,33)
+--PanelTemplates_TabResize(2, header2, 25, 25)
+
+header3:SetText("Party")
+PanelTemplates_TabResize(header3, 0,75)
+header3:SetScript("OnClick", function(self,button)
+scrollFrame2:Hide()
+scrollFrame:Hide()
+scrollFrame3:Show()
+end)
+
+
 
 local slider1 = CreateFrame("Slider", nil, msgFrame, "OptionsSliderTemplate")
 local footerwidth = footer:GetStringWidth()
@@ -795,7 +886,7 @@ BuildDisplayList()
  msgFrame:SetPoint("TOPRIGHT",minibtn,-30,-30)
  
 if listPopulated == false then
-
+local displayList2startPoint = #displayList
 for i = 1,#displayList do
 
 if displayList[i].id ~= "" then
@@ -872,6 +963,86 @@ end
 body:SetPoint("TOPLEFT",18,0-(i*10))
 body:SetPoint("TOPRIGHT",-12,-25-(i*10))
 end
+for i = 1,#displayList2 do
+
+if displayList2[i].id ~= "" then
+
+--if WoWofEmpiresDB.disabledList[displayList[i].id] == true then
+local playbtn = CreateFrame("Button",nil,scrollChild)
+if WoWofEmpiresDB.disabledList[displayList2[i].id] ~= true then
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+else
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
+end
+playbtn:RegisterForClicks("AnyUp")
+playbtn:SetPoint("LEFT")
+playbtn:SetSize(14,14)
+playbtn:SetPoint("TOPLEFT",0,0-(i*10)-(displayList2startPoint*10))
+playbtn:SetScript("OnClick", function(self,button)
+if button == "RightButton" then
+if WoWofEmpiresDB.disabledList[displayList2[i].id] ~= true then
+WoWofEmpiresDB.disabledList[displayList2[i].id] = true
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
+
+else
+WoWofEmpiresDB.disabledList[displayList2[i].id] = nil
+playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
+playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+
+end
+
+else
+if WoWofEmpiresDB.disabledList[displayList2[i].id] ~= true then
+if UnitInParty("player")  then
+SendChatMessage(displayList2[i].id ,"PARTY");
+else
+SendChatMessage(displayList2[i].id ,"SAY");
+end
+end
+
+end
+end)
+--else
+--local playbtn = CreateFrame("Button",nil,scrollChild)
+--playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
+--playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
+--playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
+--playbtn:RegisterForClicks("AnyUp")
+--playbtn:SetPoint("LEFT")
+--playbtn:SetSize(14,14)
+--playbtn:SetPoint("TOPLEFT",0,0-(i*10))
+--playbtn:SetScript("OnClick", function(self,button)
+
+
+--end)
+--end
+--playbtn = CreateFrame("Button",nil,scrollChild,"UIDropDownMenuButtonTemplate")
+
+end
+local body = scrollChild:CreateFontString("ARTWORK", nil, "GameFontNormalSmall")
+body:SetPoint("TOP", 0, 0)
+body:SetJustifyH("LEFT")
+body:SetJustifyV("TOP")
+body:SetTextColor(1,1,1,1)
+if displayList[i].id ~= "" then
+
+body:SetText("["..displayList2[i].id.."] - "..displayList2[i].str)
+
+end
+body:SetPoint("TOPLEFT",18,0-(i*10)-(displayList2startPoint*10))
+body:SetPoint("TOPRIGHT",-12,-25-(i*10)-(displayList2startPoint*10))
+end
+
+
+
+
 listPopulated = true
 end
 
@@ -939,7 +1110,7 @@ local function checkHealth()
     shouldRun = true
   end
   if healthPercentage < 0.3 and shouldRun == true then
-  if UnitInParty("player") == true then
+  if UnitInParty("player") == true and not inPublicParty() then
 SendChatMessage("18", "PARTY")
 end
     

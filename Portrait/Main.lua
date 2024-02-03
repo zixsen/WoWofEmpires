@@ -1,4 +1,4 @@
-﻿local highestPortraitIndex = 5
+﻿local highestPortraitIndex = 6
 
 
 local defaultPortraitIndex = 0
@@ -6,8 +6,8 @@ local defaultPortraitIndex = 0
 
 
 
-local TPortraitBase = "Interface\\AddOns\\CustomPlayerPortrait\\Portraits\\"
-local TPortrait = "Interface\\AddOns\\CustomPlayerPortrait\\Portraits\\1"
+local TPortraitBase = "Interface\\AddOns\\WoWofEmpires\\Portrait\\Portraits\\"
+local TPortrait = "Interface\\AddOns\\WoWofEmpires\\Portrait\\Portraits\1"
 
 
 local function UpdateMicroButtonPortrait ()
@@ -201,6 +201,8 @@ function CustomPlayerPortraitFrame_OnEvent (self, event, ...)
 {name = "Moffegreven", index = 1},
 {name = "Enticed", index = 4},
 {name = "Koettpangmos", index = 5},
+{name = "Wubbidubbi", index = 6},
+{name = "Lafafa", index = 1},
 }
 		end
 		TPortrait = TPortraitBase .. savedPortraitIndex
