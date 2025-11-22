@@ -1,6 +1,12 @@
 ## Interface: 11404
 ## Title: WoWofEmpires
 ## SavedVariables: WoWofEmpiresDB,savedPortraitIndex,PortraitKungarna
+config.lua
+utils.lua
+sounds.lua
+chat.lua
+events.lua
+merchant.lua
 core.lua
 Portrait\Main.lua
 Portrait\Main.xml
