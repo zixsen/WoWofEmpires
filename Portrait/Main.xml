@@ -1,9 +1,0 @@
-<Ui>
-	<Script file="Main.lua" />
-	<Frame name='CustomPlayerPortraitFrame' hidden='true'>
-		<Scripts>
-			<OnLoad function='CustomPlayerPortraitFrame_OnLoad' />
-			<OnEvent function='CustomPlayerPortraitFrame_OnEvent' />
-		</Scripts>
-	</Frame>
-</Ui>

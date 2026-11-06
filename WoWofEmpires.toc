@@ -1,5 +1,9 @@
 ## Interface: 16001
-## Title: WoWofEmpires
-## SavedVariables: WoWofEmpiresDB,savedPortraitIndex,PortraitKungarna
+## Title: WoW of Empires
+## Notes: Age of Empires taunts and meme sounds for your group, plus a few quality-of-life helpers.
+## IconTexture: Interface\Icons\INV_Helmet_08
+## SavedVariables: WoWofEmpiresDB
+
 core.lua
-Portrait\Main.xml
+portraits.lua
+ui.lua

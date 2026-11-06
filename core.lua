@@ -1,1049 +1,394 @@
-WoWofEmpires = {}
-local frame = CreateFrame("Frame")
--- trigger event with /reloadui or /rl
-frame:RegisterEvent("PLAYER_LOGIN")
+-- WoW of Empires: Age of Empires taunts and meme sounds for your group, plus a few
+-- quality-of-life helpers. Built for WoW Forever (Midnight client, interface 16001).
+local addonName, ns = ...
 
-frame:SetScript("OnEvent", function(this, event, ...)
-    WoWofEmpires[event](WoWofEmpires, ...)
+local SOUND_PATH = "Interface\\AddOns\\WoWofEmpires\\sound\\"
+local PREFIX_BLINK, PREFIX_KOS = "WoWofEmpires2", "WoWofEmpiresKoS"
+
+ns.defaults = {
+	disabledList = {}, -- muted sounds, keyed like ns.taunts / ns.words
+	vendorGrey = false,
+	repair = false,
+	autoInv = false,
+	minimapAngle = 200,
+}
+
+-- Saying the number (taunts) or the word (sound bites) in chat plays it for everyone with the addon.
+ns.taunts = {
+	[1] = "Yes.ogg",
+	[2] = "No.ogg",
+	[3] = "Food,_please.ogg",
+	[4] = "Wood,_please.ogg",
+	[5] = "Gold,_please.ogg",
+	[6] = "Stone,_please.ogg",
+	[7] = "Ahh.ogg",
+	[8] = "All_hail.ogg",
+	[9] = "Oooh.ogg",
+	[10] = "Back_to_age_one.ogg",
+	[11] = "Herb_laugh.ogg",
+	[12] = "Being_rushed.ogg",
+	[13] = "Blame_your_isp.ogg",
+	[14] = "Start_the_game.ogg",
+	[15] = "Don't_point_that_thing.ogg",
+	[16] = "Enemy_sighted.ogg",
+	[17] = "It_is_good.ogg",
+	[18] = "I_need_a_monk.ogg",
+	[19] = "Long_time_no_siege.ogg",
+	[20] = "My_granny.ogg",
+	[21] = "Nice_town_i'll_take_it.ogg",
+	[22] = "Quit_touchin.ogg",
+	[23] = "Raiding_party.ogg",
+	[24] = "Dadgum.ogg",
+	[25] = "Smite_me.ogg",
+	[26] = "The_wonder.ogg",
+	[27] = "You_play_two_hours.ogg",
+	[28] = "You_should_see_the_other_guy.ogg",
+	[29] = "Roggan.ogg",
+	[30] = "Wololo.ogg",
+	[31] = "Attack_an_enemy_now.ogg",
+	[36] = "Wait_for_my_signal_to_attack.ogg",
+	[42] = "What_age_are_you_in.ogg",
+	[105] = "Resign.ogg",
+}
+
+ns.words = {
+	["anton"] = "anton.mp3",
+	["bitconnect"] = "Bitconnect.ogg",
+	["bruh"] = "bruh.mp3",
+	["damn"] = "goddamnboah.mp3",
+	["durudu"] = "durudu.ogg",
+	["fake news"] = "fake-news-great.mp3",
+	["fast"] = "im-fast-as-fuck-boii-2.mp3",
+	["gay"] = "hah-gay.mp3",
+	["hehehey"] = "heheheey.ogg",
+	["huuu"] = "huuuuuuu.mp3",
+	["hype"] = "Zulp Hype.ogg",
+	["maths"] = "Quick maths.ogg",
+	["nonono"] = "mmhmmhnonono.ogg",
+	["ohnono"] = "Oh-no-no-no.mp3",
+	["profamity"] = "Watch yo profamity.ogg",
+	["run"] = "run.ogg",
+	["skrra"] = "Skrra.ogg",
+	["snoop"] = "snoop dogg.mp3",
+	["stats"] = "Check the statistacs.ogg",
+	["wassawassa"] = "wasa-wasa-wasa-wassup.ogg",
+	["whaat"] = "whaaat.ogg",
+	["whatsup"] = "wowwowWhatsUp.ogg",
+	["whyrun"] = "Why are you running.ogg",
+	["wow"] = "wow.ogg",
+	["yeboi"] = "heheyeahboy.ogg",
+	["zzz"] = "zzz.ogg",
+}
+
+-- Auras on you: the client plays these itself, so they work in combat even though addons
+-- can't read auras there. Forever keeps Classic spell IDs; the client stops each clip after 5s.
+local PLAYER_AURA_SOUNDS = {
+	[605] = "Ingemar-Franko.mp3", [10911] = "Ingemar-Franko.mp3", [10912] = "Ingemar-Franko.mp3", -- Mind Control
+	[6789] = "vemvare.ogg", [17925] = "vemvare.ogg", [17926] = "vemvare.ogg", -- Death Coil
+	[17941] = "ShadowTrance.ogg", -- Shadow Trance
+}
+
+------------------------------------------------------------------------
+-- Events: one frame, any number of handlers per event.
+-- Handlers get (event, ...). Pass unit tokens to register a unit event.
+------------------------------------------------------------------------
+local eventFrame = CreateFrame("Frame")
+local handlers = {}
+
+eventFrame:SetScript("OnEvent", function(_, event, ...)
+	for _, handler in ipairs(handlers[event]) do
+		handler(event, ...)
+	end
 end)
 
-function WoWofEmpires:PLAYER_LOGIN()
+function ns.On(event, handler, ...)
+	if not handlers[event] then
+		handlers[event] = {}
+		if ... then
+			eventFrame:RegisterUnitEvent(event, ...)
+		else
+			eventFrame:RegisterEvent(event)
+		end
+	end
+	table.insert(handlers[event], handler)
+end
+local On = ns.On
 
-       if not WoWofEmpiresDB then
-	   WoWofEmpiresDB = {
-	   disabledList = {
-	   
-	   },
-	   }
-	   WoWofEmpiresDB.vendorGrey = false
-	   WoWofEmpiresDB.repair = false
-	   WoWofEmpiresDB.autoInv = false
-	   WoWofEmpiresDB.Bagspace = false
+On("ADDON_LOADED", function(_, name)
+	if name ~= addonName then return end
+	WoWofEmpiresDB = WoWofEmpiresDB or {}
+	for key, value in pairs(ns.defaults) do
+		if WoWofEmpiresDB[key] == nil then
+			WoWofEmpiresDB[key] = type(value) == "table" and CopyTable(value) or value
+		end
+	end
+	ns.db = WoWofEmpiresDB
+end)
 
-	   
-    end
+------------------------------------------------------------------------
+-- Sound helpers
+------------------------------------------------------------------------
+local recentHandles = {}
 
+-- Plays a file from the sound folder on the Dialog channel. Global so macros can use it.
+function EmpirePlay(file)
+	local willPlay, handle = PlaySoundFile(SOUND_PATH .. file, "Dialog")
+	if handle then
+		table.insert(recentHandles, handle)
+		if #recentHandles > 5 then table.remove(recentHandles, 1) end
+	end
+	return willPlay, handle
 end
 
-
-
-
-
-local soundFolder = "Interface\\AddOns\\WoWofEmpires\\sound\\"
-local textureFolder = "Interface\\AddOns\\WoWofEmpires\\texture\\"
-
-function EmpirePlay(sound)
-return PlaySoundFile(soundFolder..""..sound,"Dialog")
-end
+-- Text to speech on your own speakers. Global so macros can use it.
 function EmpireSay(text)
-return C_VoiceChat.SpeakText(0, text, 0, 100)
+	C_VoiceChat.SpeakText(0, text, 0, 100)
 end
 
-
-
-local whisperList = {}
-local f = CreateFrame("Frame")
-f:RegisterEvent("CHAT_MSG_WHISPER_INFORM")
-f:SetScript("OnEvent",function(self,event,text,sender)
--- Forever (Midnight client) hides chat payloads during lockdown; touching them errors.
-if issecretvalue(sender) then return end
-local i,j =  string.find(sender,GetRealmName())
-if i ~= nil then sender = string.sub(sender,1,i-2) end
-whisperList[sender] = {lastWhisper = GetTime()}
-end)
-
-
-
-function EmpireWhisper(message)
-for i = 1,C_FriendList.GetNumWhoResults() do 
-local name = C_FriendList.GetWhoInfo(i).fullName
---if name ~= UnitName("player") then
-if whisperList[name] == nil or GetTime() - whisperList[name].lastWhisper > 10*60 then
-C_ChatInfo.SendChatMessage(message, "WHISPER", nil, name)
-end
---end
-end
+function ns.StopRecentSounds()
+	for _, handle in ipairs(recentHandles) do
+		StopSound(handle, 500)
+	end
+	wipe(recentHandles)
 end
 
-
-local events = {"CHAT_MSG_YELL","CHAT_MSG_SAY","CHAT_MSG_PARTY","CHAT_MSG_WHISPER","CHAT_MSG_PARTY_LEADER","CHAT_MSG_GUILD","CHAT_MSG_RAID","CHAT_MSG_RAID_LEADER","CHAT_MSG_EMOTE"}
-local playerName = UnitName("player")
-local IntToSound = {
-[1] = "Yes.ogg",
-[2] = "No.ogg",
-[3] = "Food,_please.ogg",
-[4] = "Wood,_please.ogg",
-[5] = "Gold,_please.ogg",
-[6] = "Stone,_please.ogg",
-[7] = "Ahh.ogg",
-[8] = "All_hail.ogg",
-[9] = "Oooh.ogg",
-[10] = "Back_to_age_one.ogg",
-[11] = "Herb_laugh.ogg",
-[12] = "Being_rushed.ogg",
-[13] = "Blame_your_isp.ogg",
-[14] = "Start_the_game.ogg",
-[15] = "Don't_point_that_thing.ogg",
-[16] = "Enemy_sighted.ogg",
-[17] = "It_is_good.ogg",
-[18] = "I_need_a_monk.ogg",
-[19] = "Long_time_no_siege.ogg",
-[20] = "My_granny.ogg",
-[21] = "Nice_town_i'll_take_it.ogg",
-[22]= "Quit_touchin.ogg",
-[23] = "Raiding_party.ogg",
-[24] = "Dadgum.ogg",
-[25] = "Smite_me.ogg",
-[26] = "The_wonder.ogg",
-[27] = "You_play_two_hours.ogg",
-[28] = "You_should_see_the_other_guy.ogg",
-[29] = "Roggan.ogg",
-[30] = "Wololo.ogg",
-[31] = "Attack_an_enemy_now.ogg",
-[36] = "Wait_for_my_signal_to_attack.ogg",
-[42] = "What_age_are_you_in.ogg",
-[105] = "Resign.ogg",
-}
-
-local StringToSound = {
-["ohnono"] = "Oh-no-no-no.mp3",
-["damn"] = "goddamnboah.mp3",
-["bruh"] = "bruh.mp3",
-["yeboi"] = "heheyeahboy.ogg",
-["anton"] = "anton.mp3",
-["zzz"] = "zzz.ogg",
-["gay"] = "hah-gay.mp3",
-["huuu"] = "huuuuuuu.mp3",
-["fake news"] = "fake-news-great.mp3",
-["fast"] = "im-fast-as-fuck-boii-2.mp3",
-["snoop"] = "snoop dogg.mp3",
-["wow"] = "wow.ogg",
-["hype"] = "Zulp Hype.ogg",
-["bitconnect"] = "Bitconnect.ogg",
-["hehehey"] = "heheheey.ogg",
-["nonono"] = "mmhmmhnonono.ogg",
-["wassawassa"] = "wasa-wasa-wasa-wassup.ogg",
-["whaat"] = "whaaat.ogg",
-["whatsup"] = "wowwowWhatsUp.ogg",
-["run"] = "run.ogg",
-["whyrun"] = "Why are you running.ogg",
-["maths"] = "Quick maths.ogg",
-["skrra"] = "Skrra.ogg",
-["stats"] = "Check the statistacs.ogg",
-["profamity"] = "Watch yo profamity.ogg",
-["durudu"] = "Durudu.ogg",
-}
-table.sort(StringToSound, function(a, b) return tostring(a) < tostring(b) end)
-
-TEH_SQUAD = {
-["Addons"] = true,
-["Krasslig"] = true,
-["Moffegreven"] = true,
-["Koettpangmos"] = true,
-["Enticed"] = true,
-["Doodoodoo"] = true,
-["Barre"] = true,
-["Bength"] = true,
-}
-local listPopulated = false
-local displayList = {}
-local displayList2 = {}
-
-
-
- --YOINKED sorted pairs function ez4me
-local function spairs(t, order)
-    -- collect the keys
-    local keys = {}
-    for k in pairs(t) do keys[#keys+1] = k end
-
-    -- if order function given, sort by it by passing the table and keys a, b,
-    -- otherwise just sort the keys 
-    if order then
-        table.sort(keys, function(a,b) return order(t, a, b) end)
-    else
-        table.sort(keys)
-    end
-
-    -- return the iterator function
-    local i = 0
-    return function()
-        i = i + 1
-        if keys[i] then
-            return keys[i], t[keys[i]]
-        end
-    end
+function ns.SoundFor(key)
+	return ns.taunts[key] or ns.words[key]
 end
 
-function tContain(table, element)
-  for _, value in pairs(table) do
-    if value == element then
-      return true
-    end
-  end
-  return false
+function ns.IsMuted(key)
+	return ns.db.disabledList[key] == true
 end
 
-
-
--- GetHomePartyInfo is gone in Forever; read the party unit names instead.
-local function PartyNames()
-local names = {}
-for i = 1,GetNumSubgroupMembers() do
-names[#names+1] = UnitName("party"..i)
-end
-return names
+function ns.SetMuted(key, muted)
+	ns.db.disabledList[key] = muted or nil
 end
 
+-- Says the trigger in party (or /say when solo) so everyone with the addon hears it.
+function ns.Broadcast(key)
+	C_ChatInfo.SendChatMessage(tostring(key), IsInGroup() and "PARTY" or "SAY")
+end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("MERCHANT_SHOW")
-f:SetScript("OnEvent", function()
-if WoWofEmpiresDB.vendorGrey == true then
-local totPrice = 0
-local totItems = 0
-for b = 0,4 do
-for s = 1,C_Container.GetContainerNumSlots(b) do
-local info = C_Container.GetContainerItemInfo(b, s)
-if info and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue then
-local price = select(11, C_Item.GetItemInfo(info.itemID)) or 0
-C_Container.UseContainerItem(b,s)
-totPrice = totPrice+(price*info.stackCount)
-totItems = totItems+info.stackCount
+-- "Oh-no-no-no.mp3" -> "Oh no no no"
+function ns.LabelFor(file)
+	return (file:gsub("%.%a+$", ""):gsub("[_-]", " "))
 end
-end
-end
-if totPrice > 0 then print("Sold "..totItems.."x item(s) for: "..C_CurrencyInfo.GetCoinTextureString(totPrice)) end
-end
-if WoWofEmpiresDB.repair and CanMerchantRepair() then
-local repairAllCost, canRepair = GetRepairAllCost()
-if canRepair then
-RepairAllItems()
-print("Repaired all items for: "..C_CurrencyInfo.GetCoinTextureString(repairAllCost))
-end
-end
-end)
 
+function ns.Print(message)
+	print("|cffffd100WoW of Empires:|r " .. message)
+end
+
+------------------------------------------------------------------------
+-- Chat triggers
+------------------------------------------------------------------------
+local function IsMe(sender)
+	return Ambiguate(sender, "short") == UnitName("player")
+end
 
 local function IsFriend(name)
-for i = 1,C_FriendList.GetNumFriends() do
-local friendInfo = C_FriendList.GetFriendInfoByIndex(i)
-if friendInfo and friendInfo.name == name then return true end
-end
-return false
-end
-
-function IsBnetFriend(name)
-for i = 1,BNGetNumFriends() do
-local account = C_BattleNet.GetFriendAccountInfo(i)
-if account and account.gameAccountInfo.characterName == name then return true end
-end
-return false
-end
-
-
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("PARTY_INVITE_REQUEST")
-f:SetScript("OnEvent", function(self,event,name)
-C_FriendList.ShowFriends()
-if (IsFriend(name) or IsBnetFriend(name)) and WoWofEmpiresDB.autoInv then
-AcceptGroup()
-StaticPopup_Hide("PARTY_INVITE")
-end
-end)
-local f = CreateFrame("Frame")
-f:RegisterEvent("CHAT_MSG_WHISPER")
-f:SetScript("OnEvent",function(self,event,text,sender)
-if issecretvalue(text) or issecretvalue(sender) then return end
-local r = {}
-for word in sender:gmatch("[^-]+") do
-	    table.insert(r, word)
+	name = Ambiguate(name, "short")
+	for i = 1, C_FriendList.GetNumFriends() do
+		local info = C_FriendList.GetFriendInfoByIndex(i)
+		if info and Ambiguate(info.name, "short") == name then return true end
 	end
-local senderShort = r[1]
-if (IsFriend(senderShort) or IsBnetFriend(senderShort)) and WoWofEmpiresDB.autoInv then
-if text == "inv" then C_PartyInfo.InviteUnit(sender) end
+	for i = 1, BNGetNumFriends() do
+		local account = C_BattleNet.GetFriendAccountInfo(i)
+		if account and account.gameAccountInfo.characterName == name then return true end
+	end
+	return false
 end
+
+-- "spam: <message>" from you whispers everyone in your last /who results, once per 10 minutes each.
+local lastWhisper = {}
+
+On("CHAT_MSG_WHISPER_INFORM", function(_, _, target)
+	if issecretvalue(target) then return end
+	lastWhisper[Ambiguate(target, "short")] = GetTime()
 end)
 
-local f = CreateFrame("Frame")
-f.shouldOOR = true
-f.counter = 0
-f:RegisterEvent("UI_ERROR_MESSAGE")
-f:SetScript("OnEvent", function(self,event,id,str)
-if id == LE_GAME_ERR_OUT_OF_RANGE and f.shouldOOR and C_CVar.GetCVarBool("Sound_EnableErrorSpeech") then
-C_CVar.SetCVar("Sound_EnableErrorSpeech","0")
-if f.counter > 1 then f.counter = 0 end
-f.counter = f.counter + 1
-EmpirePlay("Too_far_away"..f.counter..".ogg")
-f.shouldOOR = false
-C_Timer.After(1, function()
-f.shouldOOR = true
-C_CVar.SetCVar("Sound_EnableErrorSpeech","1")
+local function WhisperWhoResults(message)
+	for i = 1, C_FriendList.GetNumWhoResults() do
+		local name = C_FriendList.GetWhoInfo(i).fullName
+		local last = lastWhisper[Ambiguate(name, "short")]
+		if not last or GetTime() - last > 600 then
+			C_ChatInfo.SendChatMessage(message, "WHISPER", nil, name)
+		end
+	end
+end
+
+-- Spy integration: "!kos" in guild chat shares your kill-on-sight list with guildmates who run this addon.
+local function ShareKillOnSight()
+	if not (Spy and SpyPerCharDB) then return end
+	local names = {}
+	for _, player in pairs(SpyPerCharDB.PlayerData) do
+		if player.kos == 1 then
+			C_ChatInfo.SendAddonMessage(PREFIX_KOS, player.name, "GUILD")
+			table.insert(names, player.name)
+		end
+	end
+	ns.Print("Shared " .. #names .. " kill-on-sight name(s) with your guild: " .. table.concat(names, ", "))
+end
+
+local function OnChat(event, text, sender)
+	-- Forever hides chat text in restricted content (dungeons, encounters); skip those messages.
+	if issecretvalue(text) or issecretvalue(sender) then return end
+	local lower = text:lower()
+
+	if lower:sub(1, 4) == "tts:" then
+		EmpireSay(strtrim(text:sub(5)))
+	elseif lower:sub(1, 5) == "spam:" and IsMe(sender) then
+		WhisperWhoResults(strtrim(text:sub(6)))
+	elseif lower == "!kos" and event == "CHAT_MSG_GUILD" and IsMe(sender) then
+		ShareKillOnSight()
+	elseif lower == "inv" and event == "CHAT_MSG_WHISPER" and ns.db.autoInv and IsFriend(sender) then
+		C_PartyInfo.InviteUnit(sender)
+	end
+
+	local key = tonumber(text) or lower
+	local file = ns.SoundFor(key)
+	if file and not ns.IsMuted(key) then
+		EmpirePlay(file)
+	end
+end
+
+for _, event in ipairs({
+	"CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE", "CHAT_MSG_WHISPER", "CHAT_MSG_GUILD",
+	"CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
+}) do
+	On(event, OnChat)
+end
+
+C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_BLINK)
+C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_KOS)
+
+On("CHAT_MSG_ADDON", function(_, prefix, text)
+	if issecretvalue(prefix) or issecretvalue(text) then return end
+	if prefix == PREFIX_BLINK and text == "blinkCastSuccess" then
+		EmpirePlay("blink.ogg")
+		print("Här kan man va!")
+	elseif prefix == PREFIX_KOS and Spy and SpyPerCharDB and not SpyPerCharDB.PlayerData[text] then
+		Spy:ToggleKOSPlayer(true, text)
+	end
 end)
-end
-end)
 
-
-
-local function DeathSound(int)
-if int == nil then
-local i = math.random(5)
-EmpirePlay("death"..i..".mp3")
-else
-EmpirePlay("death"..int..".mp3")
-end
-end
-local function DeathEvent(self, event, ...)
-    DeathSound()
-end
-local deathframe = CreateFrame("Frame")
-deathframe:RegisterEvent("PLAYER_DEAD")
-deathframe:SetScript("OnEvent", DeathEvent)
-
-local function RaiseEvent(self, event, ...)
-    EmpirePlay("born.mp3")
-end
-local raiseframe = CreateFrame("Frame")
-raiseframe:RegisterEvent("PLAYER_UNGHOST")
-raiseframe:SetScript("OnEvent", RaiseEvent)
-
-
--- Forever blocks the combat log and hides auras from addons in combat.
--- Auras on you: the client plays the sound itself (AddAuraSound), so these work in combat.
--- Forever keeps Classic spell IDs. The client cuts each clip after 5 seconds.
-local playerAuraSounds = {
-[605] = "Ingemar-Franko.mp3", [10911] = "Ingemar-Franko.mp3", [10912] = "Ingemar-Franko.mp3", -- Mind Control
-[6789] = "vemvare.ogg", [17925] = "vemvare.ogg", [17926] = "vemvare.ogg", -- Death Coil
-[17941] = "ShadowTrance.ogg", -- Shadow Trance
-}
-for spellID, file in pairs(playerAuraSounds) do
-C_UnitAuras.AddAuraSound(Enum.UnitAuraSoundTrigger.Added, {unitToken = "player", spellID = spellID, soundFileName = soundFolder..file, outputChannel = "Dialog"})
+------------------------------------------------------------------------
+-- Game event sounds
+------------------------------------------------------------------------
+for spellID, file in pairs(PLAYER_AURA_SOUNDS) do
+	C_UnitAuras.AddAuraSound(Enum.UnitAuraSoundTrigger.Added, {
+		unitToken = "player", spellID = spellID, soundFileName = SOUND_PATH .. file, outputChannel = "Dialog",
+	})
 end
 
 -- ponytail: Web on your target is matched by name, so it only fires when auras aren't hidden (out of combat).
 -- Move it to AddAuraSound with unitToken "target" once the Forever Web spell IDs are known.
--- PARTY_KILL laugh and "broken by" print dropped, no addon-visible source for them now.
-local auraFrame = CreateFrame("Frame")
-auraFrame:RegisterUnitEvent("UNIT_AURA", "target")
-auraFrame:SetScript("OnEvent", function(self, event, unit, info)
-local added = info.addedAuras
-if issecretvalue(added) or not added then return end
-for _, aura in ipairs(added) do
-if not issecretvalue(aura) and not issecretvalue(aura.name) and aura.name == "Web" then EmpirePlay("spindelnat.ogg") end
-end
+On("UNIT_AURA", function(_, _, info)
+	local added = info.addedAuras
+	if issecretvalue(added) or not added then return end
+	for _, aura in ipairs(added) do
+		if not issecretvalue(aura) and not issecretvalue(aura.name) and aura.name == "Web" then
+			EmpirePlay("spindelnat.ogg")
+		end
+	end
+end, "target")
+
+-- One Blink in ten makes your group play the blink sound.
+On("UNIT_SPELLCAST_SUCCEEDED", function(_, _, _, spellID)
+	if issecretvalue(spellID) or C_Spell.GetSpellName(spellID) ~= "Blink" or math.random(10) ~= 1 then return end
+	C_ChatInfo.SendAddonMessage(PREFIX_BLINK, "blinkCastSuccess", IsInGroup() and "PARTY" or "SAY")
+end, "player")
+
+On("PLAYER_DEAD", function()
+	EmpirePlay("death" .. math.random(5) .. ".mp3")
 end)
 
-local blinkFrame = CreateFrame("Frame")
-blinkFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-blinkFrame:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
-if issecretvalue(spellID) or C_Spell.GetSpellName(spellID) ~= "Blink" or math.random(1,10) ~= 1 then return end
-C_ChatInfo.SendAddonMessage("WoWofEmpires2", "blinkCastSuccess", UnitInParty("player") and "PARTY" or "SAY")
+On("PLAYER_UNGHOST", function()
+	EmpirePlay("born.mp3")
 end)
-local itemSoundHandle = 1
-local LootFrame = CreateFrame("Frame")
-LootFrame:RegisterEvent("START_LOOT_ROLL")
-LootFrame:SetScript("OnEvent", function(_, _, id)
-if not id then return end
-local texture, name, count, quality = GetLootRollItemInfo(id)
-local rollLink = GetLootRollItemLink(id)
-local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
-itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
-    C_Item.GetItemInfo(rollLink)
-	if itemEquipLoc == "INVTYPE_FINGER" then
-	StopSound(itemSoundHandle)
-	_,itemSoundHandle = EmpirePlay("welkenring.ogg")
+
+-- Level up: your group hears Snoop. Solo it's an emote, since /say needs a key press.
+On("PLAYER_LEVEL_UP", function()
+	C_ChatInfo.SendChatMessage("snoop", IsInGroup() and "PARTY" or "EMOTE")
+end)
+
+-- Low health: health is secret to addons, but Blizzard's red low-health pulse (LowHealthFrame, 35% or
+-- less) is not. Each time it starts, ask your group for a monk ("18"). Only when everyone in the party
+-- is a friend, and not where Forever blocks addon chat (dungeons, raids, encounters, PvP).
+-- ponytail: rides on Blizzard's flash, so it stays silent if "Flash screen at low health" is turned off.
+LowHealthFrame:HookScript("OnShow", function()
+	-- The same frame also flashes in combat behind full-screen panels; that isn't low health.
+	if GetUIPanel("fullscreen") or not IsInGroup() or C_ChatInfo.InChatMessagingLockdown() then return end
+	for i = 1, GetNumSubgroupMembers() do
+		local name = UnitName("party" .. i)
+		if not name or issecretvalue(name) or not IsFriend(name) then return end
+	end
+	C_ChatInfo.SendChatMessage("18", "PARTY")
+end)
+
+-- "Out of range": swap the default error voice for alternating "too far away" clips.
+local outOfRangeReady, outOfRangeClip = true, 0
+
+On("UI_ERROR_MESSAGE", function(_, errorType)
+	if errorType ~= LE_GAME_ERR_OUT_OF_RANGE or not outOfRangeReady then return end
+	if not C_CVar.GetCVarBool("Sound_EnableErrorSpeech") then return end
+	C_CVar.SetCVar("Sound_EnableErrorSpeech", "0")
+	outOfRangeClip = outOfRangeClip % 2 + 1
+	EmpirePlay("Too_far_away" .. outOfRangeClip .. ".ogg")
+	outOfRangeReady = false
+	C_Timer.After(1, function()
+		outOfRangeReady = true
+		C_CVar.SetCVar("Sound_EnableErrorSpeech", "1")
+	end)
+end)
+
+-- Rings get their own song (restarted if another ring drops); other rare+ loot gets a cheer.
+local ringHandle
+
+On("START_LOOT_ROLL", function(_, rollID)
+	local _, _, _, quality = GetLootRollItemInfo(rollID)
+	local link = GetLootRollItemLink(rollID)
+	local equipLoc = link and select(9, C_Item.GetItemInfo(link))
+	if equipLoc == "INVTYPE_FINGER" then
+		if ringHandle then StopSound(ringHandle) end
+		ringHandle = select(2, EmpirePlay("welkenring.ogg"))
 	elseif quality and quality > 2 then
-	EmpirePlay("Sopahit.ogg")
+		EmpirePlay("Sopahit.ogg")
 	end
 end)
 
+------------------------------------------------------------------------
+-- Quality of life
+------------------------------------------------------------------------
+On("MERCHANT_SHOW", function()
+	if ns.db.vendorGrey then
+		local total, count = 0, 0
+		for bag = 0, 4 do
+			for slot = 1, C_Container.GetContainerNumSlots(bag) do
+				local info = C_Container.GetContainerItemInfo(bag, slot)
+				if info and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue then
+					total = total + (select(11, C_Item.GetItemInfo(info.itemID)) or 0) * info.stackCount
+					count = count + info.stackCount
+					C_Container.UseContainerItem(bag, slot)
+				end
+			end
+		end
+		if total > 0 then
+			ns.Print("Sold " .. count .. " grey item(s) for " .. C_CurrencyInfo.GetCoinTextureString(total))
+		end
+	end
 
-
- 
-local f = CreateFrame("Frame")
-f:RegisterEvent("CHAT_MSG_ADDON")
-C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpires2")
-C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpiresKoS")
-
-f:SetScript("OnEvent", function(self, event, prefix,text,chan)
-if issecretvalue(prefix) or issecretvalue(text) then return end
-if prefix == "WoWofEmpires2" and text == "blinkCastSuccess" then
-EmpirePlay("blink.ogg")
-print("Här kan man va!")
-end
-
-if prefix == "WoWofEmpiresKoS" and Spy ~= nil then
-if SpyPerCharDB["PlayerData"][text] == nil then
-Spy:ToggleKOSPlayer(true,text)
-end
-end
-
-end)
-
-
-
-local minibtn = CreateFrame("Button", nil, Minimap)
-minibtn:SetFrameLevel(8)
-minibtn:SetSize(32,32)
-minibtn:SetMovable(true)
-  
-minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
---[[
-local imgFrame = CreateFrame("FRAME", nil, UIParent,BackdropTemplateMixin and "BackdropTemplate") 
-local backdropInfo =
-{
-bgFile = textureFolder.."NewProject2.tga",
---edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-tile = true,
-tileEdge = false,
-tileSize = 500,
-edgeSize = 8,
-insets = { left = 1, right = 1, top = 1, bottom = 1 },
-}
---local imgFrame = CreateFrame("Frame")
-imgFrame:SetWidth(525)
-imgFrame:SetHeight(525)
-
-imgFrame:SetPoint("CENTER",UIParent,"Center")
-
---imgFrame.texture = imgFrame:CreateTexture("IMG_TEXTURE","BACKGROUND")
---imgFrame.texture:SetPoint("TOPLEFT")
---imgFrame.texture:SetTexture(textureFolder.."test.tga")
--- imgFrame:Show()
-
-local frame = CreateFrame("Frame")
-
--- The minimum number of seconds between each update
-local ONUPDATE_INTERVAL = 0.04
-
--- The number of seconds since the last update
-local TimeSinceLastUpdate = 0
-frame:SetScript("OnUpdate", function(self, elapsed)
-	TimeSinceLastUpdate = TimeSinceLastUpdate + elapsed
-	if TimeSinceLastUpdate >= ONUPDATE_INTERVAL then
-		TimeSinceLastUpdate = 0
-		local cameraZoom = GetCameraZoom()
-		local bginfo = backdropInfo
-		local factor = 25
-		bginfo.tileSize = 500-(cameraZoom*factor)
-print(bginfo.tileSize)
-imgFrame:SetBackdrop(bginfo)
-imgFrame:SetWidth(510-(cameraZoom*factor))
-imgFrame:SetHeight(510-(cameraZoom*factor))
-
-imgFrame:ApplyBackdrop()
-local a = math.random(-5,5)
-local b = math.random(-5,5)
-imgFrame:SetPoint("CENTER",UIParent,"Center",a,b)
-imgFrame:Show()
-imgFrame:Hide()
-		-- Do stuff
+	if ns.db.repair and CanMerchantRepair() then
+		local cost, canRepair = GetRepairAllCost()
+		if canRepair then
+			RepairAllItems()
+			ns.Print("Repaired everything for " .. C_CurrencyInfo.GetCoinTextureString(cost))
+		end
 	end
 end)
 
--- When the frame is shown, reset the update timer
-frame:SetScript("OnShow", function(self)
-	TimeSinceLastUpdate = 0
-end)
-]]--
-
-
-local myIconPos = 0
- 
-local function UpdateMapBtn()
-local Xpoa, Ypoa = GetCursorPosition()
-local Xmin, Ymin = Minimap:GetLeft(), Minimap:GetBottom()
-Xpoa = Xmin - Xpoa / Minimap:GetEffectiveScale() + 70
-Ypoa = Ypoa / Minimap:GetEffectiveScale() - Ymin - 70
-myIconPos = math.deg(math.atan2(Ypoa, Xpoa))
-minibtn:ClearAllPoints()
-minibtn:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 52 - (80 * cos(myIconPos)), (80 * sin(myIconPos)) - 52)
-end
- 
-minibtn:RegisterForDrag("LeftButton")
-minibtn:SetScript("OnDragStart", function()
-minibtn:StartMoving()
-minibtn:SetScript("OnUpdate", UpdateMapBtn)
-end)
- minibtn:RegisterForClicks("AnyUp")
-minibtn:SetScript("OnDragStop", function()
-minibtn:StopMovingOrSizing();
-minibtn:SetScript("OnUpdate", nil)
-UpdateMapBtn();
-end)
- 
-minibtn:ClearAllPoints();
-minibtn:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 52 - (80 * cos(myIconPos)),(80 * sin(myIconPos)) - 52)
- 
-local msgFrame = CreateFrame("FRAME", "WoWofEmpiresFrame", UIParent, "BackdropTemplate")
-tinsert(UISpecialFrames, "WoWofEmpiresFrame") -- Escape closes it natively
-local backdropInfo =
-{
-bgFile = "Interface\\QuestFrame\\QuestBG",
-edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-tile = true,
-tileEdge = true,
-tileSize = 550,
-edgeSize = 8,
-insets = { left = 1, right = 1, top = 1, bottom = 1 },
-}
-
-msgFrame:SetWidth(350)
-msgFrame:SetHeight(400)
-msgFrame:SetBackdrop(backdropInfo);
-msgFrame:SetBackdropColor(255/255,240/255,179/255,0.7);
-msgFrame:SetBackdropBorderColor(0.1,0.1,0.1,1);
-msgFrame:SetMovable(true);
-msgFrame:EnableMouse(true);
-
-msgFrame:SetMovable(true);
-msgFrame:SetToplevel(true);
-msgFrame:SetClampedToScreen(true);
-
-
-msgFrame:SetPoint("CENTER")
-msgFrame:SetFrameStrata("TOOLTIP")
-msgFrame.text = msgFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-msgFrame.text:SetJustifyH("LEFT")
-msgFrame.text:SetJustifyV("TOP")
-msgFrame.text:SetPoint("TOPLEFT",10,-10)
-msgFrame.close = CreateFrame("Button",nil,msgFrame,"UIPanelCloseButton");
-msgFrame.close:SetPoint("TOPRIGHT",5,25);
--- The old keyboard capture called SetPropagateKeyboardInput, which is blocked in combat on this client.
-msgFrame:SetScript("OnHide", function()
-minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
-end);
- 
- 
-msgFrame:Hide()
-
-local frame = CreateFrame("Frame")
-local ONUPDATE_INTERVAL = 0.05
-local TimeSinceLastUpdate = 0
-frame:SetScript("OnUpdate", function(self, elapsed)
-TimeSinceLastUpdate = TimeSinceLastUpdate + elapsed
-if TimeSinceLastUpdate >= ONUPDATE_INTERVAL then
-if msgFrame:IsVisible() then
-
-if msgFrame:GetWidth() < 350 then
-msgFrame:SetWidth(TimeSinceLastUpdate*1000)
-else
-msgFrame:SetWidth(350)
-end
-if msgFrame:GetHeight() < 400 then
-msgFrame:SetHeight(TimeSinceLastUpdate*1000)
-else
-msgFrame:SetHeight(400)
-end
-end
-end
-end)
-
-
-msgFrame:SetScript("OnShow", function(self)
-TimeSinceLastUpdate = 0
-msgFrame:SetWidth(1)
-msgFrame:SetHeight(1)
-end)
-local f = CreateFrame("Frame")
-
-
-
-local function BuildDisplayList()
-wipe(displayList);
-wipe(displayList2);
-
-	for k,v in spairs(IntToSound) do
-table.insert(displayList,{id = k,str = v})
-end
-
-
-table.insert(displayList,{id = "",str = ""})
-
-for k,v in pairs(StringToSound) do
-table.insert(displayList2,{id = k, str = v})
-end
-
-for i = 1,#displayList do
-local patterns = {"%.ogg","%.mp3"}
- for p = 1,#patterns do
- displayList[i].str = displayList[i].str:gsub(patterns[p], "")
- end
-displayList[i].str = displayList[i].str:gsub("_", " ")
-displayList[i].str = displayList[i].str:gsub("-", " ")
-end
-for i = 1,#displayList2 do
-local patterns = {"%.ogg","%.mp3"}
- for p = 1,#patterns do
- displayList2[i].str = displayList2[i].str:gsub(patterns[p], "")
- end
-displayList2[i].str = displayList2[i].str:gsub("_", " ")
-displayList2[i].str = displayList2[i].str:gsub("-", " ")
-end
-table.sort(displayList2, function(a, b) return tostring(a.id) < tostring(b.id)end) 
-
-end
-local lastFiveSounds = {}
-
-for i = 1,#events do
-f:RegisterEvent(events[i])
-end
-local currentHandle
-f:SetScript("OnEvent", function(self, event, text,sender)
-if issecretvalue(text) or issecretvalue(sender) then return end
-local eventCheck = false
-currentHandle = nil
-for i = 1,#events do
-if event == events[i] then
-eventCheck = true
-end
-end
-if eventCheck == true then
-local ttsSTR = string.sub(text,1,4)
-if ttsSTR == "tts:" then
-local newText = text:sub(string.len(ttsSTR))
-EmpireSay(newText)
-end
-
-local fplayerName = GetUnitName("player")
-local fplayerName = playerName.."-"..GetRealmName()
-local spamSTR = string.sub(text,1,5)
-if spamSTR == "spam:" and sender == fplayerName then
-local newText = text:sub(2+string.len(spamSTR))
-EmpireWhisper(newText)
-end
-
-if event == "CHAT_MSG_GUILD" and text == "!kos" and sender == fplayerName and Spy ~= nil then
-local namesSent = ""
-for k,v in pairs(SpyPerCharDB["PlayerData"]) do
-if v.kos == 1 then
-C_ChatInfo.SendAddonMessage("WoWofEmpiresKoS", v.name, "GUILD")
-namesSent = v.name..", "..namesSent
-end
-end
-print("Shared: "..namesSent.."to guild.")
-end
-
-
-end
-	if (eventCheck == true and not (WoWofEmpiresDB.disabledList[string.lower(text)] or WoWofEmpiresDB.disabledList[tonumber(text)])) then
-		if StringToSound[tostring(string.lower(text))] ~= nil then _,currentHandle = EmpirePlay(""..StringToSound[tostring(string.lower(text))]) end
-		if IntToSound[tonumber(text)] ~= nil then _,currentHandle = EmpirePlay(""..IntToSound[tonumber(text)]) end
-if #lastFiveSounds > 4 then
-table.remove(lastFiveSounds,1)
-end
-table.insert(lastFiveSounds,currentHandle)
+On("PARTY_INVITE_REQUEST", function(_, inviter)
+	if ns.db.autoInv and IsFriend(inviter) then
+		AcceptGroup()
+		StaticPopup_Hide("PARTY_INVITE")
 	end
 end)
-
-
-local title = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormalLarge")
-title:SetPoint("TOP",0,-10)
-title:SetText("WoWofEmpires")
-
-
-local scrollFrame = CreateFrame("ScrollFrame", nil, msgFrame, "UIPanelScrollFrameTemplate")
-scrollFrame:SetPoint("TOPLEFT", 3, -30)
-scrollFrame:SetPoint("BOTTOMRIGHT", -27, 44)
-local scrollFrame2 = CreateFrame("ScrollFrame", nil, msgFrame, "UIPanelScrollFrameTemplate")
-scrollFrame2:SetPoint("TOPLEFT", 3, -30)
-scrollFrame2:SetPoint("BOTTOMRIGHT", -27, 44)
-scrollFrame2:Hide()
-local scrollFrame3 = CreateFrame("ScrollFrame", nil, msgFrame, "UIPanelScrollFrameTemplate")
-scrollFrame3:SetPoint("TOPLEFT", 3, -30)
-scrollFrame3:SetPoint("BOTTOMRIGHT", -27, 44)
-scrollFrame3:Hide()
-local scrollChild = CreateFrame("Frame")
-scrollFrame:SetScrollChild(scrollChild)
-scrollChild:SetWidth(msgFrame:GetWidth()-18)
-scrollChild:SetHeight(1) 
-
-local scrollChild2 = CreateFrame("Frame")
-scrollFrame2:SetScrollChild(scrollChild2)
-scrollChild2:SetWidth(msgFrame:GetWidth()-18)
-scrollChild2:SetHeight(1) 
-
-local scrollChild3 = CreateFrame("Frame")
-scrollFrame3:SetScrollChild(scrollChild3)
-scrollChild3:SetWidth(msgFrame:GetWidth()-18)
-scrollChild3:SetHeight(1) 
-
-
-
-local myparty = PartyNames()
-if myparty ~= nil then
-for i = 1,#myparty do
-local body3 = scrollChild3:CreateFontString("ARTWORK",nil,"GameFontNormalSmall")
-body3:SetPoint("TOPLEFT", 15, 1-i*10)
-body3:SetJustifyH("LEFT")
-body3:SetJustifyV("TOP")
-body3:SetTextColor(1,1,1,1)
-body3:SetText(myparty[i])
-end
-end
-
-
-
-
-
--- for i = 1,45 do 
--- local body2 = scrollChild2:CreateFontString("ARTWORK", nil, "GameFontNormalSmall")
--- body2:SetPoint("TOPLEFT", 5, 1-i*10)
--- body2:SetJustifyH("LEFT")
--- body2:SetJustifyV("TOP")
--- body2:SetTextColor(1,1,1,1)
--- body2:SetText("aa"..i)
--- end
-local cbVendorGrey = CreateFrame("CheckButton", "vendorgrey_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
-cbVendorGrey:SetSize(20,20)
-cbVendorGrey:SetPoint("TOPLEFT")
-vendorgrey_CBnameText:SetText("Auto vendor greys");
-
-cbVendorGrey:SetScript("OnClick", 
-  function()
-  WoWofEmpiresDB.vendorGrey = cbVendorGrey:GetChecked() 
-  end)
-  
-  local cbRepair = CreateFrame("CheckButton", "repair_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
-  cbRepair:SetSize(20,20)
-cbRepair:SetPoint("TOPLEFT",0,-16*1)
-repair_CBnameText:SetText("Auto repair");
-
-cbRepair:SetScript("OnClick", 
-  function()
-  WoWofEmpiresDB.repair = cbRepair:GetChecked() 
-  end)
-  
-    local cbAutoInv = CreateFrame("CheckButton", "autoinv_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
-  cbAutoInv:SetSize(20,20)
-cbAutoInv:SetPoint("TOPLEFT",0,-16*2)
-autoinv_CBnameText:SetText("Auto-Accept group (from friends)");
-
-cbAutoInv:SetScript("OnClick", 
-  function()
-  WoWofEmpiresDB.autoInv = cbAutoInv:GetChecked() 
-  end)
-  
-  
-  local bagspaceframe = CreateFrame("Frame")
-  bagspaceframe:SetFrameStrata("TOOLTIP")
- local bagspacetext = bagspaceframe:CreateFontString("OVERLAY",nil,"GameFontNormal")
- bagspacetext:SetShadowColor(0, 0, 0,1)
-bagspacetext:SetShadowOffset(2, -2)
-bagspacetext:SetScale(1.2)
- bagspacetext:SetPoint("CENTER",MainMenuBarBackpackButton,0,-3)
---bagspacetext:SetTextColor(1,1,1,1)
-local f = CreateFrame("Frame")
-f:RegisterEvent("BAG_UPDATE")
-f:SetScript("OnEvent",function()
-local bgspace = 0
-for i = 0,4 do
-local numberOfFreeSlots,bagType = C_Container.GetContainerNumFreeSlots(i)
-local bagName = C_Container.GetBagName(i)
-if bagName ~= nil and not (bagName:find("Soul") or bagName:find("Felcloth")) then
-bgspace = bgspace + numberOfFreeSlots
-end
-end
-if bgspace <= 3 then
-bagspacetext:SetTextColor(1,0,0,1)
-else
-bagspacetext:SetTextColor(1,1,1,1)
-end
-bagspacetext:SetText("["..bgspace.."]")
-  if WoWofEmpiresDB ~= nil and WoWofEmpiresDB.Bagspace then
-  bagspacetext:Show()
-  else
-  bagspacetext:Hide()
-  end
-  
-end)
-
-local cbBagspace = CreateFrame("CheckButton", "Bagspace_CBname", scrollChild2, "ChatConfigCheckButtonTemplate");
-cbBagspace:SetSize(20,20)
-cbBagspace:SetPoint("TOPLEFT",0,-16*3)
-Bagspace_CBnameText:SetText("Show bagspace on first bag.");
-
-cbBagspace:SetScript("OnClick", 
-  function()
-  WoWofEmpiresDB.Bagspace = cbBagspace:GetChecked()
-  if WoWofEmpiresDB.Bagspace then
-  bagspacetext:Show()
-  else
-  bagspacetext:Hide()
-  end
-  end)
-
-  
-local footer = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
-footer:SetPoint("BOTTOMLEFT",5,22)
-footer:SetText("Volume:")
-local footer2 = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
-footer2:SetPoint("BOTTOMRIGHT",-7,7)
-footer2:SetText("Right-click minimap\nbutton to stop\nlast sounds.")
--- TabButtonTemplate is gone in Forever; the top-tab template resizes on show, so pin the old 75px width.
-msgFrame.minTabWidth = 75
-local header1 = CreateFrame("BUTTON",nil,msgFrame,"PanelTopTabButtonTemplate")
-header1:SetPoint("TOPLEFT",0,33)
---PanelTemplates_TabResize(2, header1, 25, 25)
-
-header1:SetText("Main")
-PanelTemplates_TabResize(header1, 0,75)
-header1:SetScript("OnClick", function(self,button)
-scrollFrame:Show()
-scrollFrame2:Hide()
-scrollFrame3:Hide()
-end)
-
-local header2 = CreateFrame("BUTTON",nil,msgFrame,"PanelTopTabButtonTemplate")
-header2:SetPoint("TOPLEFT",75,33)
---PanelTemplates_TabResize(2, header2, 25, 25)
-
-header2:SetText("QoL")
-PanelTemplates_TabResize(header2, 0,75)
-header2:SetScript("OnClick", function(self,button)
-scrollFrame:Hide()
-scrollFrame3:Hide()
-cbVendorGrey:SetChecked(WoWofEmpiresDB.vendorGrey) 
-cbRepair:SetChecked(WoWofEmpiresDB.repair) 
-cbAutoInv:SetChecked(WoWofEmpiresDB.autoInv) 
-cbBagspace:SetChecked(WoWofEmpiresDB.Bagspace) 
-scrollFrame2:Show()
-end)
-local header3 = CreateFrame("BUTTON",nil,msgFrame,"PanelTopTabButtonTemplate")
-header3:SetPoint("TOPLEFT",75+75,33)
---PanelTemplates_TabResize(2, header2, 25, 25)
-
-header3:SetText("Party")
-PanelTemplates_TabResize(header3, 0,75)
-header3:SetScript("OnClick", function(self,button)
-scrollFrame2:Hide()
-scrollFrame:Hide()
-scrollFrame3:Show()
-end)
-
-
-
-local slider1 = CreateFrame("Slider", nil, msgFrame, "UISliderTemplateWithLabels")
-local footerwidth = footer:GetStringWidth()
-slider1:SetPoint("BOTTOMLEFT", footerwidth+15,18)
-slider1:SetMinMaxValues(0,1)
-local VolumeValue = tonumber(C_CVar.GetCVar("Sound_DialogVolume"))
-slider1:SetValue(VolumeValue)
-slider1:SetValueStep(0.01)
-slider1:SetObeyStepOnDrag(true)
-slider1:SetScript("OnValueChanged", function(self,value,userInput)
-C_CVar.SetCVar("Sound_DialogVolume",value)
-end)
-minibtn:SetScript("OnClick", function(self,button)
-if button == "LeftButton" then
-BuildDisplayList()
-
- local x, y = GetCursorPosition();
- msgFrame:SetPoint("TOPRIGHT",minibtn,-30,-30)
- 
-if listPopulated == false then
-local displayList2startPoint = #displayList
-for i = 1,#displayList do
-
-if displayList[i].id ~= "" then
-
---if WoWofEmpiresDB.disabledList[displayList[i].id] == true then
-local playbtn = CreateFrame("Button",nil,scrollChild)
-if WoWofEmpiresDB.disabledList[displayList[i].id] ~= true then
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
-else
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
-end
-playbtn:RegisterForClicks("AnyUp")
-playbtn:SetPoint("LEFT")
-playbtn:SetSize(14,14)
-playbtn:SetPoint("TOPLEFT",0,0-(i*10))
-playbtn:SetScript("OnClick", function(self,button)
-if button == "RightButton" then
-if WoWofEmpiresDB.disabledList[displayList[i].id] ~= true then
-WoWofEmpiresDB.disabledList[displayList[i].id] = true
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
-
-else
-WoWofEmpiresDB.disabledList[displayList[i].id] = nil
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
-
-end
-
-else
-if WoWofEmpiresDB.disabledList[displayList[i].id] ~= true then
-if UnitInParty("player")  then
-C_ChatInfo.SendChatMessage(displayList[i].id ,"PARTY");
-else
-C_ChatInfo.SendChatMessage(displayList[i].id ,"SAY");
-end
-end
-
-end
-end)
---else
---local playbtn = CreateFrame("Button",nil,scrollChild)
---playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
---playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
---playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
---playbtn:RegisterForClicks("AnyUp")
---playbtn:SetPoint("LEFT")
---playbtn:SetSize(14,14)
---playbtn:SetPoint("TOPLEFT",0,0-(i*10))
---playbtn:SetScript("OnClick", function(self,button)
-
-
---end)
---end
---playbtn = CreateFrame("Button",nil,scrollChild,"UIDropDownMenuButtonTemplate")
-
-end
-local body = scrollChild:CreateFontString("ARTWORK", nil, "GameFontNormalSmall")
-body:SetPoint("TOP", 0, 0)
-body:SetJustifyH("LEFT")
-body:SetJustifyV("TOP")
-body:SetTextColor(1,1,1,1)
-if displayList[i].id ~= "" then
-
-body:SetText("["..displayList[i].id.."] - "..displayList[i].str)
-
-end
-body:SetPoint("TOPLEFT",18,0-(i*10))
-body:SetPoint("TOPRIGHT",-12,-25-(i*10))
-end
-for i = 1,#displayList2 do
-
-if displayList2[i].id ~= "" then
-
---if WoWofEmpiresDB.disabledList[displayList[i].id] == true then
-local playbtn = CreateFrame("Button",nil,scrollChild)
-if WoWofEmpiresDB.disabledList[displayList2[i].id] ~= true then
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
-else
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
-end
-playbtn:RegisterForClicks("AnyUp")
-playbtn:SetPoint("LEFT")
-playbtn:SetSize(14,14)
-playbtn:SetPoint("TOPLEFT",0,0-(i*10)-(displayList2startPoint*10))
-playbtn:SetScript("OnClick", function(self,button)
-if button == "RightButton" then
-if WoWofEmpiresDB.disabledList[displayList2[i].id] ~= true then
-WoWofEmpiresDB.disabledList[displayList2[i].id] = true
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Red.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Red.png")
-
-else
-WoWofEmpiresDB.disabledList[displayList2[i].id] = nil
-playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
-
-end
-
-else
-if WoWofEmpiresDB.disabledList[displayList2[i].id] ~= true then
-if UnitInParty("player")  then
-C_ChatInfo.SendChatMessage(displayList2[i].id ,"PARTY");
-else
-C_ChatInfo.SendChatMessage(displayList2[i].id ,"SAY");
-end
-end
-
-end
-end)
---else
---local playbtn = CreateFrame("Button",nil,scrollChild)
---playbtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
---playbtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
---playbtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
---playbtn:RegisterForClicks("AnyUp")
---playbtn:SetPoint("LEFT")
---playbtn:SetSize(14,14)
---playbtn:SetPoint("TOPLEFT",0,0-(i*10))
---playbtn:SetScript("OnClick", function(self,button)
-
-
---end)
---end
---playbtn = CreateFrame("Button",nil,scrollChild,"UIDropDownMenuButtonTemplate")
-
-end
-local body = scrollChild:CreateFontString("ARTWORK", nil, "GameFontNormalSmall")
-body:SetPoint("TOP", 0, 0)
-body:SetJustifyH("LEFT")
-body:SetJustifyV("TOP")
-body:SetTextColor(1,1,1,1)
-if displayList[i].id ~= "" then
-
-body:SetText("["..displayList2[i].id.."] - "..displayList2[i].str)
-
-end
-body:SetPoint("TOPLEFT",18,0-(i*10)-(displayList2startPoint*10))
-body:SetPoint("TOPRIGHT",-12,-25-(i*10)-(displayList2startPoint*10))
-end
-
-
-
-
-listPopulated = true
-end
-
-if msgFrame:IsVisible() then
-minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
-
-msgFrame:Hide()
-
- else 
-
-minibtn:SetNormalTexture("Interface/COMMON/Indicator-Green.png")
-minibtn:SetPushedTexture("Interface/COMMON/Indicator-Green.png")
-minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Green.png")
-
-msgFrame:Show() end
-end
-if button == "RightButton" and currentHandle ~= nil then
-for i = 1,#lastFiveSounds do
-StopSound(lastFiveSounds[i],500)
-end
-end
-end)
-local levelup = CreateFrame("Frame")
-levelup:RegisterEvent("PLAYER_LEVEL_UP")
-levelup:SetScript("OnEvent", function(self, event)
-if UnitInParty("player") then
-C_ChatInfo.SendChatMessage("snoop","PARTY");
-else
---auto sending chat messages to SAY requires HW input so using emote for now.
-C_ChatInfo.SendChatMessage("snoop", "EMOTE");
-end
-end)
-
--- Removed for Forever: the custom bag search box (the backpack has one built in now)
--- and the low-health "18" callout (UnitHealth is always a secret value to addons).
-
---print(SpyPerCharDB["PlayerData"][playerName].kos)
--- NOTES
--- Spy:ToggleKOSPlayer(bool, stringname)
-
---
