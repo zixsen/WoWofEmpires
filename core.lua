@@ -309,20 +309,28 @@ raiseframe:RegisterEvent("PLAYER_UNGHOST")
 raiseframe:SetScript("OnEvent", RaiseEvent)
 
 
--- Forever blocks the combat log for addons, so aura sounds come from UNIT_AURA instead.
--- ponytail: PARTY_KILL laugh and "broken by" print dropped, no addon-visible source for them now.
-local auraSounds = {
-player = {["Mind Control"] = "Ingemar-Franko.mp3", ["Shadow Trance"] = "ShadowTrance.ogg", ["Death Coil"] = "vemvare.ogg"},
-target = {["Web"] = "spindelnat.ogg"},
+-- Forever blocks the combat log and hides auras from addons in combat.
+-- Auras on you: the client plays the sound itself (AddAuraSound), so these work in combat.
+-- Forever keeps Classic spell IDs. The client cuts each clip after 5 seconds.
+local playerAuraSounds = {
+[605] = "Ingemar-Franko.mp3", [10911] = "Ingemar-Franko.mp3", [10912] = "Ingemar-Franko.mp3", -- Mind Control
+[6789] = "vemvare.ogg", [17925] = "vemvare.ogg", [17926] = "vemvare.ogg", -- Death Coil
+[17941] = "ShadowTrance.ogg", -- Shadow Trance
 }
+for spellID, file in pairs(playerAuraSounds) do
+C_UnitAuras.AddAuraSound(Enum.UnitAuraSoundTrigger.Added, {unitToken = "player", spellID = spellID, soundFileName = soundFolder..file, outputChannel = "Dialog"})
+end
+
+-- ponytail: Web on your target is matched by name, so it only fires when auras aren't hidden (out of combat).
+-- Move it to AddAuraSound with unitToken "target" once the Forever Web spell IDs are known.
+-- PARTY_KILL laugh and "broken by" print dropped, no addon-visible source for them now.
 local auraFrame = CreateFrame("Frame")
-auraFrame:RegisterUnitEvent("UNIT_AURA", "player", "target")
+auraFrame:RegisterUnitEvent("UNIT_AURA", "target")
 auraFrame:SetScript("OnEvent", function(self, event, unit, info)
 local added = info.addedAuras
 if issecretvalue(added) or not added then return end
 for _, aura in ipairs(added) do
-local sound = not issecretvalue(aura) and not issecretvalue(aura.name) and auraSounds[unit][aura.name]
-if sound then EmpirePlay(sound) end
+if not issecretvalue(aura) and not issecretvalue(aura.name) and aura.name == "Web" then EmpirePlay("spindelnat.ogg") end
 end
 end)
 
