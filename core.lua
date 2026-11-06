@@ -318,9 +318,10 @@ target = {["Web"] = "spindelnat.ogg"},
 local auraFrame = CreateFrame("Frame")
 auraFrame:RegisterUnitEvent("UNIT_AURA", "player", "target")
 auraFrame:SetScript("OnEvent", function(self, event, unit, info)
-if issecretvalue(info) or not info.addedAuras then return end
-for _, aura in ipairs(info.addedAuras) do
-local sound = not issecretvalue(aura.name) and auraSounds[unit][aura.name]
+local added = info.addedAuras
+if issecretvalue(added) or not added then return end
+for _, aura in ipairs(added) do
+local sound = not issecretvalue(aura) and not issecretvalue(aura.name) and auraSounds[unit][aura.name]
 if sound then EmpirePlay(sound) end
 end
 end)
@@ -776,7 +777,9 @@ footer:SetText("Volume:")
 local footer2 = msgFrame:CreateFontString("ARTWORK", nil, "GameFontNormal")
 footer2:SetPoint("BOTTOMRIGHT",-7,7)
 footer2:SetText("Right-click minimap\nbutton to stop\nlast sounds.")
-local header1 = CreateFrame("BUTTON",nil,msgFrame,"TabButtonTemplate")
+-- TabButtonTemplate is gone in Forever; the top-tab template resizes on show, so pin the old 75px width.
+msgFrame.minTabWidth = 75
+local header1 = CreateFrame("BUTTON",nil,msgFrame,"PanelTopTabButtonTemplate")
 header1:SetPoint("TOPLEFT",0,33)
 --PanelTemplates_TabResize(2, header1, 25, 25)
 
@@ -788,7 +791,7 @@ scrollFrame2:Hide()
 scrollFrame3:Hide()
 end)
 
-local header2 = CreateFrame("BUTTON",nil,msgFrame,"TabButtonTemplate")
+local header2 = CreateFrame("BUTTON",nil,msgFrame,"PanelTopTabButtonTemplate")
 header2:SetPoint("TOPLEFT",75,33)
 --PanelTemplates_TabResize(2, header2, 25, 25)
 
@@ -803,7 +806,7 @@ cbAutoInv:SetChecked(WoWofEmpiresDB.autoInv)
 cbBagspace:SetChecked(WoWofEmpiresDB.Bagspace) 
 scrollFrame2:Show()
 end)
-local header3 = CreateFrame("BUTTON",nil,msgFrame,"TabButtonTemplate")
+local header3 = CreateFrame("BUTTON",nil,msgFrame,"PanelTopTabButtonTemplate")
 header3:SetPoint("TOPLEFT",75+75,33)
 --PanelTemplates_TabResize(2, header2, 25, 25)
 
