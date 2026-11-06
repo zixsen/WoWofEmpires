@@ -1,4 +1,4 @@
-﻿local highestPortraitIndex = 6
+local highestPortraitIndex = 6
 
 
 local defaultPortraitIndex = 0
@@ -7,14 +7,7 @@ local defaultPortraitIndex = 0
 
 
 local TPortraitBase = "Interface\\AddOns\\WoWofEmpires\\Portrait\\Portraits\\"
-local TPortrait = "Interface\\AddOns\\WoWofEmpires\\Portrait\\Portraits\1"
-
-
-local function UpdateMicroButtonPortrait ()
-	if MicroButtonPortrait then
-		SetPortraitTexture (MicroButtonPortrait, 'player')
-	end
-end
+local TPortrait = TPortraitBase .. "1"
 
 
 local function UpdatePaperDollPortrait ()
@@ -31,26 +24,23 @@ local function UpdateDressUpPortrait ()
 end
 
 
+-- Forever uses the retail unit frames: party frames live at PartyFrame.MemberFrame1-4
+-- and every unit frame keeps its portrait texture in .portrait.
+local function PartyMemberFrame (i)
+	return PartyFrame and PartyFrame["MemberFrame" .. i]
+end
+
+
 local function UpdatePortraits ()
-	SetPortraitTexture (PlayerPortrait, PlayerFrame.unit)
-	SetPortraitTexture (TargetFramePortrait, TargetFrame.unit)
-	if PartyMemberFrame1 then
-	SetPortraitTexture (PartyMemberFrame1Portrait, PartyMemberFrame1.unit)
+	local frames = { PlayerFrame, TargetFrame, TargetFrame.totFrame }
+	for i = 1, 4 do
+		frames[#frames + 1] = PartyMemberFrame (i)
 	end
-	if PartyMemberFrame2 then
-	SetPortraitTexture (PartyMemberFrame2Portrait, PartyMemberFrame2.unit)
+	for _, frame in pairs (frames) do
+		if frame.portrait and frame.unit then
+			SetPortraitTexture (frame.portrait, frame.unit)
+		end
 	end
-	if PartyMemberFrame3 then
-	SetPortraitTexture (PartyMemberFrame3Portrait, PartyMemberFrame3.unit)
-	end
-	if PartyMemberFrame4 then
-	SetPortraitTexture (PartyMemberFrame4Portrait, PartyMemberFrame4.unit)
-	end
-	if TargetFrame.totFrame and TargetFrame.totFrame.unit then
-	 	SetPortraitTexture (TargetFrameToTPortrait, TargetFrame.totFrame.unit)
-	end
- 	
-	UpdateMicroButtonPortrait ()
 	UpdatePaperDollPortrait ()
 	UpdateDressUpPortrait ()
 end
@@ -76,107 +66,40 @@ local function PlayerFrame_OnMouseWheel (self, direction)
 	UpdatePortraits ()
 end
 
-local function PartyMemberFrame1_OnMouseWheel (self, direction)
-for i = 1,#PortraitKungarna do
-if UnitName("party1") == PortraitKungarna[i].name then
-if direction > 0 and PortraitKungarna[i].index < highestPortraitIndex then
-PortraitKungarna[i].index = PortraitKungarna[i].index+1
-local TPortrait = TPortraitBase .. PortraitKungarna[i].index
-end
-if direction < 0 and PortraitKungarna[i].index > 0 then
-PortraitKungarna[i].index = PortraitKungarna[i].index-1
-end
-end
-UpdatePortraits ()
-end
 
-end
-local function PartyMemberFrame2_OnMouseWheel (self, direction)
-for i = 1,#PortraitKungarna do
-if UnitName("party2") == PortraitKungarna[i].name then
-if direction > 0 and PortraitKungarna[i].index < highestPortraitIndex then
-PortraitKungarna[i].index = PortraitKungarna[i].index+1
-local TPortrait = TPortraitBase .. PortraitKungarna[i].index
-end
-if direction < 0 and PortraitKungarna[i].index > 0 then
-PortraitKungarna[i].index = PortraitKungarna[i].index-1
-end
-end
-UpdatePortraits ()
-end
-end
-local function PartyMemberFrame3_OnMouseWheel (self, direction)
-for i = 1,#PortraitKungarna do
-if UnitName("party3") == PortraitKungarna[i].name then
-if direction > 0 and PortraitKungarna[i].index < highestPortraitIndex then
-PortraitKungarna[i].index = PortraitKungarna[i].index+1
-local TPortrait = TPortraitBase .. PortraitKungarna[i].index
-end
-if direction < 0 and PortraitKungarna[i].index > 0 then
-PortraitKungarna[i].index = PortraitKungarna[i].index-1
-end
-end
-UpdatePortraits ()
-end
-end
-local function PartyMemberFrame4_OnMouseWheel (self, direction)
-for i = 1,#PortraitKungarna do
-if UnitName("party4") == PortraitKungarna[i].name then
-if direction > 0 and PortraitKungarna[i].index < highestPortraitIndex then
-PortraitKungarna[i].index = PortraitKungarna[i].index+1
-local TPortrait = TPortraitBase .. PortraitKungarna[i].index
-end
-if direction < 0 and PortraitKungarna[i].index > 0 then
-PortraitKungarna[i].index = PortraitKungarna[i].index-1
-end
-end
-UpdatePortraits ()
-end
-end
-
-
-local function Hook_SetPortraitTexture (portrait, unit)
-
-	if UnitIsUnit (unit, 'player') and portrait and (savedPortraitIndex > 0) then
-		portrait:SetTexture (TPortrait)
-else
-local partyUnit
-for i = 1,#PortraitKungarna do 
-
-local partyMembers = GetNumGroupMembers()-1
-if partyMembers < 5 then
-for p = 1,partyMembers do
-if UnitName("party"..p) == PortraitKungarna[i].name then
-partyUnit = "party"..p
-	if UnitIsUnit (unit, partyUnit) and portrait then
-local TPortrait2 = TPortraitBase .. PortraitKungarna[i].index
-		portrait:SetTexture(TPortrait2)
-
-end
-end
-end
-end
-
-if partyMembers >= 5 then
-for p = 1,partyMembers do
-if UnitName("raid"..p) == PortraitKungarna[i].name then
-partyUnit = "raid"..p
-	if UnitIsUnit (unit, partyUnit) and portrait then
-local TPortrait2 = TPortraitBase .. PortraitKungarna[i].index
-		portrait:SetTexture (TPortrait2)
-end
-
-end
-end
-
-
-
-end
-end
-
-
+local function PartyMemberFrame_OnMouseWheel (self, direction)
+	local name = self.unit and UnitName (self.unit)
+	if not name or issecretvalue (name) then return end
+	for i = 1, #PortraitKungarna do
+		local p = PortraitKungarna[i]
+		if p.name == name then
+			p.index = math.max (0, math.min (highestPortraitIndex, p.index + direction))
+		end
 	end
+	UpdatePortraits ()
+end
 
+
+-- Unit identity can be a secret value in restricted content; skip instead of erroring.
+local function Hook_SetPortraitTexture (portrait, unit)
+	if not portrait or not unit or not savedPortraitIndex or not PortraitKungarna then return end
+	local isPlayer = UnitIsUnit (unit, 'player')
+	if issecretvalue (isPlayer) then return end
+	if isPlayer then
+		if savedPortraitIndex > 0 then
+			portrait:SetTexture (TPortrait)
+		end
+		return
+	end
+	local name = UnitName (unit)
+	if issecretvalue (name) then return end
+	for i = 1, #PortraitKungarna do
+		local p = PortraitKungarna[i]
+		if p.name == name and p.index > 0 then
+			portrait:SetTexture (TPortraitBase .. p.index)
+			return
+		end
+	end
 end
 
 
@@ -185,7 +108,7 @@ function CustomPlayerPortraitFrame_OnEvent (self, event, ...)
 		UpdatePortraits ()
 	elseif event == 'ADDON_LOADED' then
 		local name = ...
-		if not name == "CustomPlayerPortrait" then return end
+		if name ~= "WoWofEmpires" then return end
 		if not savedPortraitIndex then
 			savedPortraitIndex = defaultPortraitIndex
 		end
@@ -217,13 +140,16 @@ end)
 function CustomPlayerPortraitFrame_OnLoad (self)
 	hooksecurefunc ('SetPortraitTexture', Hook_SetPortraitTexture)
 	PlayerFrame:EnableMouseWheel (true)
-	PlayerFrame:SetScript ('OnMouseWheel', PlayerFrame_OnMouseWheel)
-PartyMemberFrame1:SetScript ('OnMouseWheel', PartyMemberFrame1_OnMouseWheel)
-PartyMemberFrame2:SetScript ('OnMouseWheel', PartyMemberFrame2_OnMouseWheel)
-PartyMemberFrame3:SetScript ('OnMouseWheel', PartyMemberFrame3_OnMouseWheel)
-PartyMemberFrame4:SetScript ('OnMouseWheel', PartyMemberFrame4_OnMouseWheel)
+	PlayerFrame:HookScript ('OnMouseWheel', PlayerFrame_OnMouseWheel)
+	for i = 1, 4 do
+		local frame = PartyMemberFrame (i)
+		if frame then
+			frame:EnableMouseWheel (true)
+			frame:HookScript ('OnMouseWheel', PartyMemberFrame_OnMouseWheel)
+		end
+	end
 
 	self:RegisterEvent 'ADDON_LOADED'
 	self:RegisterEvent 'PLAYER_ENTERING_WORLD'
-	
+
 end

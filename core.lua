@@ -36,7 +36,7 @@ function EmpirePlay(sound)
 return PlaySoundFile(soundFolder..""..sound,"Dialog")
 end
 function EmpireSay(text)
-return C_VoiceChat.SpeakText(0, text, Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+return C_VoiceChat.SpeakText(0, text, 0, 100)
 end
 
 
@@ -45,6 +45,8 @@ local whisperList = {}
 local f = CreateFrame("Frame")
 f:RegisterEvent("CHAT_MSG_WHISPER_INFORM")
 f:SetScript("OnEvent",function(self,event,text,sender)
+-- Forever (Midnight client) hides chat payloads during lockdown; touching them errors.
+if issecretvalue(sender) then return end
 local i,j =  string.find(sender,GetRealmName())
 if i ~= nil then sender = string.sub(sender,1,i-2) end
 whisperList[sender] = {lastWhisper = GetTime()}
@@ -57,7 +59,7 @@ for i = 1,C_FriendList.GetNumWhoResults() do
 local name = C_FriendList.GetWhoInfo(i).fullName
 --if name ~= UnitName("player") then
 if whisperList[name] == nil or GetTime() - whisperList[name].lastWhisper > 10*60 then
-SendChatMessage(message, "WHISPER", nil, name)
+C_ChatInfo.SendChatMessage(message, "WHISPER", nil, name)
 end
 --end
 end
@@ -184,11 +186,13 @@ end
 
 
 
-function inPublicParty()
-myparty = GetHomePartyInfo()
-for i = 1,#myparty do
-if TEH_SQUAD[myparty[i]] == nil then return true end
+-- GetHomePartyInfo is gone in Forever; read the party unit names instead.
+local function PartyNames()
+local names = {}
+for i = 1,GetNumSubgroupMembers() do
+names[#names+1] = UnitName("party"..i)
 end
+return names
 end
 
 
@@ -198,30 +202,24 @@ f:SetScript("OnEvent", function()
 if WoWofEmpiresDB.vendorGrey == true then
 local totPrice = 0
 local totItems = 0
-local ilinkstr = ""
-for b = 0,4 do 
-for s = 0,C_Container.GetContainerNumSlots(b) do
---local ilink = C_Container.GetContainerItemLink(b, s)
---local _, stackCount, _, _, _, _, ilink = C_Container.GetContainerItemInfo(b, s);
-local ilink = C_Container.GetContainerItemInfo(b, s);
-if ilink ~= nil then
-local _,_,qual, _,_,_,_,_,_,_,price = GetItemInfo(ilink.hyperlink)
-if qual == 0 then
-
+for b = 0,4 do
+for s = 1,C_Container.GetContainerNumSlots(b) do
+local info = C_Container.GetContainerItemInfo(b, s)
+if info and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue then
+local price = select(11, C_Item.GetItemInfo(info.itemID)) or 0
 C_Container.UseContainerItem(b,s)
-totPrice = totPrice+(price*ilink.stackCount)
-totItems = totItems+(1*ilink.stackCount)
+totPrice = totPrice+(price*info.stackCount)
+totItems = totItems+info.stackCount
 end
 end
 end
-end
-if totPrice > 0 then print("Sold "..totItems.."x item(s) for: "..GetCoinTextureString(totPrice)) end
+if totPrice > 0 then print("Sold "..totItems.."x item(s) for: "..C_CurrencyInfo.GetCoinTextureString(totPrice)) end
 end
 if WoWofEmpiresDB.repair and CanMerchantRepair() then
 local repairAllCost, canRepair = GetRepairAllCost()
 if canRepair then
 RepairAllItems()
-print("Repaired all items for: "..GetCoinTextureString(repairAllCost))
+print("Repaired all items for: "..C_CurrencyInfo.GetCoinTextureString(repairAllCost))
 end
 end
 end)
@@ -230,21 +228,17 @@ end)
 local function IsFriend(name)
 for i = 1,C_FriendList.GetNumFriends() do
 local friendInfo = C_FriendList.GetFriendInfoByIndex(i)
-if friendInfo.name == name then return true
-else
+if friendInfo and friendInfo.name == name then return true end
+end
 return false
-end
-end
 end
 
 function IsBnetFriend(name)
 for i = 1,BNGetNumFriends() do
-local friendInfo = select(5,BNGetFriendInfo(i))
-if friendInfo == name then return true
-else
+local account = C_BattleNet.GetFriendAccountInfo(i)
+if account and account.gameAccountInfo.characterName == name then return true end
+end
 return false
-end
-end
 end
 
 
@@ -254,24 +248,21 @@ f:RegisterEvent("PARTY_INVITE_REQUEST")
 f:SetScript("OnEvent", function(self,event,name)
 C_FriendList.ShowFriends()
 if (IsFriend(name) or IsBnetFriend(name)) and WoWofEmpiresDB.autoInv then
-for i = 1,STATICPOPUP_NUMDIALOGS do
-local staticpopup = _G["StaticPopup"..i]
-if staticpopup:IsVisible() and staticpopup.which == "PARTY_INVITE" then
-StaticPopup_OnClick(staticpopup, 1)
-end
-end
+AcceptGroup()
+StaticPopup_Hide("PARTY_INVITE")
 end
 end)
 local f = CreateFrame("Frame")
 f:RegisterEvent("CHAT_MSG_WHISPER")
 f:SetScript("OnEvent",function(self,event,text,sender)
+if issecretvalue(text) or issecretvalue(sender) then return end
 local r = {}
 for word in sender:gmatch("[^-]+") do
 	    table.insert(r, word)
 	end
 local senderShort = r[1]
 if (IsFriend(senderShort) or IsBnetFriend(senderShort)) and WoWofEmpiresDB.autoInv then
-if text == "inv" then InviteUnit(sender) end
+if text == "inv" then C_PartyInfo.InviteUnit(sender) end
 end
 end)
 
@@ -280,19 +271,16 @@ f.shouldOOR = true
 f.counter = 0
 f:RegisterEvent("UI_ERROR_MESSAGE")
 f:SetScript("OnEvent", function(self,event,id,str)
-if id == 363 and tonumber((GetCVar("Sound_EnableErrorSpeech"))) > 0 then
-SetCVar("Sound_EnableErrorSpeech","0")
-if str == "Out of range." and f.shouldOOR then
+if id == LE_GAME_ERR_OUT_OF_RANGE and f.shouldOOR and C_CVar.GetCVarBool("Sound_EnableErrorSpeech") then
+C_CVar.SetCVar("Sound_EnableErrorSpeech","0")
 if f.counter > 1 then f.counter = 0 end
 f.counter = f.counter + 1
 EmpirePlay("Too_far_away"..f.counter..".ogg")
 f.shouldOOR = false
 C_Timer.After(1, function()
-f.shouldOOR = true 
-SetCVar("Sound_EnableErrorSpeech","1")
+f.shouldOOR = true
+C_CVar.SetCVar("Sound_EnableErrorSpeech","1")
 end)
-end
-
 end
 end)
 
@@ -321,58 +309,28 @@ raiseframe:RegisterEvent("PLAYER_UNGHOST")
 raiseframe:SetScript("OnEvent", RaiseEvent)
 
 
-local function cleuEvent(self, event)
-local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType = CombatLogGetCurrentEventInfo()
-local targetName = UnitName("target") or "noTarget"
-if subevent == "SPELL_AURA_APPLIED" and spellName == "Mind Control" and destName == playerName then
-EmpirePlay("Ingemar-Franko.mp3")
+-- Forever blocks the combat log for addons, so aura sounds come from UNIT_AURA instead.
+-- ponytail: PARTY_KILL laugh and "broken by" print dropped, no addon-visible source for them now.
+local auraSounds = {
+player = {["Mind Control"] = "Ingemar-Franko.mp3", ["Shadow Trance"] = "ShadowTrance.ogg", ["Death Coil"] = "vemvare.ogg"},
+target = {["Web"] = "spindelnat.ogg"},
+}
+local auraFrame = CreateFrame("Frame")
+auraFrame:RegisterUnitEvent("UNIT_AURA", "player", "target")
+auraFrame:SetScript("OnEvent", function(self, event, unit, info)
+if issecretvalue(info) or not info.addedAuras then return end
+for _, aura in ipairs(info.addedAuras) do
+local sound = not issecretvalue(aura.name) and auraSounds[unit][aura.name]
+if sound then EmpirePlay(sound) end
 end
+end)
 
-if subevent == "SPELL_AURA_APPLIED" and (spellName == "Web" and destName == targetName) then
-EmpirePlay("spindelnat.ogg")
---print(targetName)
-
-end
-if subevent == "SPELL_AURA_APPLIED" and spellName == "Shadow Trance" and destName == playerName then
-EmpirePlay("ShadowTrance.ogg")
-end
-
-if subevent == "SPELL_AURA_BROKEN_SPELL" then
-local timestamp,subevent,hideCaster,sourceGUID,sourceName,SourceFlags,SourceRaidFlags,destGUID,destName,destFlags,destRaidFlags,spellID,spellName,_,spellType,extraSpellId,extraSpellName,extraSchool,auraType = CombatLogGetCurrentEventInfo()
-print(spellName.." broken by: "..sourceName.." on: "..destName)
-end
-
-
-if subevent == "SPELL_CAST_SUCCESS" then
-if spellName == "Death Coil" and destName == playerName then
-EmpirePlay("vemvare.ogg")
-end
-if spellName == "Blink" and sourceName == playerName then
-local channel
-if UnitInParty("player") then channel = "PARTY" else channel = "SAY" end
-
-local i = math.random(1,10)
-if i == 1 then
-C_ChatInfo.SendAddonMessage("WoWofEmpires2", "blinkCastSuccess", channel)
---EmpirePlay("blink.ogg")
---print("Här kan man va!")
-
-
-end
-end
-end
-if subevent == "PARTY_KILL" and UnitInBattleground("player") == nil then
-locClass = GetPlayerInfoByGUID(destGUID)
-if locClass ~= nil then
-print("VILKET NYP!!!!!!!")
-EmpirePlay("Herb_laugh.ogg")
-end
-end
-
-end
-local cleu = CreateFrame("Frame")
-cleu:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-cleu:SetScript("OnEvent", cleuEvent)
+local blinkFrame = CreateFrame("Frame")
+blinkFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+blinkFrame:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
+if issecretvalue(spellID) or C_Spell.GetSpellName(spellID) ~= "Blink" or math.random(1,10) ~= 1 then return end
+C_ChatInfo.SendAddonMessage("WoWofEmpires2", "blinkCastSuccess", UnitInParty("player") and "PARTY" or "SAY")
+end)
 local itemSoundHandle = 1
 local LootFrame = CreateFrame("Frame")
 LootFrame:RegisterEvent("START_LOOT_ROLL")
@@ -382,11 +340,11 @@ local texture, name, count, quality = GetLootRollItemInfo(id)
 local rollLink = GetLootRollItemLink(id)
 local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
 itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
-    GetItemInfo(rollLink)
+    C_Item.GetItemInfo(rollLink)
 	if itemEquipLoc == "INVTYPE_FINGER" then
 	StopSound(itemSoundHandle)
 	_,itemSoundHandle = EmpirePlay("welkenring.ogg")
-	elseif quality > 2 then
+	elseif quality and quality > 2 then
 	EmpirePlay("Sopahit.ogg")
 	end
 end)
@@ -400,6 +358,7 @@ C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpires2")
 C_ChatInfo.RegisterAddonMessagePrefix("WoWofEmpiresKoS")
 
 f:SetScript("OnEvent", function(self, event, prefix,text,chan)
+if issecretvalue(prefix) or issecretvalue(text) then return end
 if prefix == "WoWofEmpires2" and text == "blinkCastSuccess" then
 EmpirePlay("blink.ogg")
 print("Här kan man va!")
@@ -510,7 +469,8 @@ end)
 minibtn:ClearAllPoints();
 minibtn:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 52 - (80 * cos(myIconPos)),(80 * sin(myIconPos)) - 52)
  
-local msgFrame = CreateFrame("FRAME", nil, UIParent,BackdropTemplateMixin and "BackdropTemplate") 
+local msgFrame = CreateFrame("FRAME", "WoWofEmpiresFrame", UIParent, "BackdropTemplate")
+tinsert(UISpecialFrames, "WoWofEmpiresFrame") -- Escape closes it natively
 local backdropInfo =
 {
 bgFile = "Interface\\QuestFrame\\QuestBG",
@@ -543,23 +503,12 @@ msgFrame.text:SetJustifyV("TOP")
 msgFrame.text:SetPoint("TOPLEFT",10,-10)
 msgFrame.close = CreateFrame("Button",nil,msgFrame,"UIPanelCloseButton");
 msgFrame.close:SetPoint("TOPRIGHT",5,25);
-msgFrame.close:SetScript("OnClick",function(self,button,down) msgFrame:Hide()
+-- The old keyboard capture called SetPropagateKeyboardInput, which is blocked in combat on this client.
+msgFrame:SetScript("OnHide", function()
 minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
 minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
 minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
- end);
- msgFrame.close:EnableKeyboard(true);
-msgFrame.close:SetScript("OnKeyDown",function(self,button,down) 
-if button == "ESCAPE" then
-msgFrame.close:SetPropagateKeyboardInput(false)
-msgFrame:Hide()
-minibtn:SetNormalTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetPushedTexture("Interface/COMMON/Indicator-Yellow.png")
-minibtn:SetHighlightTexture("Interface/COMMON/Indicator-Yellow.png")
-else
- msgFrame.close:SetPropagateKeyboardInput(true)
-end
- end);
+end);
  
  
 msgFrame:Hide()
@@ -637,6 +586,7 @@ f:RegisterEvent(events[i])
 end
 local currentHandle
 f:SetScript("OnEvent", function(self, event, text,sender)
+if issecretvalue(text) or issecretvalue(sender) then return end
 local eventCheck = false
 currentHandle = nil
 for i = 1,#events do
@@ -716,9 +666,9 @@ scrollChild3:SetHeight(1)
 
 
 
-local myparty = GetHomePartyInfo()
+local myparty = PartyNames()
 if myparty ~= nil then
-for i = 1,#myparty do 
+for i = 1,#myparty do
 local body3 = scrollChild3:CreateFontString("ARTWORK",nil,"GameFontNormalSmall")
 body3:SetPoint("TOPLEFT", 15, 1-i*10)
 body3:SetJustifyH("LEFT")
@@ -867,16 +817,16 @@ end)
 
 
 
-local slider1 = CreateFrame("Slider", nil, msgFrame, "OptionsSliderTemplate")
+local slider1 = CreateFrame("Slider", nil, msgFrame, "UISliderTemplateWithLabels")
 local footerwidth = footer:GetStringWidth()
 slider1:SetPoint("BOTTOMLEFT", footerwidth+15,18)
 slider1:SetMinMaxValues(0,1)
-local VolumeValue = tonumber(GetCVar("Sound_DialogVolume"))
+local VolumeValue = tonumber(C_CVar.GetCVar("Sound_DialogVolume"))
 slider1:SetValue(VolumeValue)
 slider1:SetValueStep(0.01)
 slider1:SetObeyStepOnDrag(true)
 slider1:SetScript("OnValueChanged", function(self,value,userInput)
-tonumber(SetCVar("Sound_DialogVolume",value))
+C_CVar.SetCVar("Sound_DialogVolume",value)
 end)
 minibtn:SetScript("OnClick", function(self,button)
 if button == "LeftButton" then
@@ -925,9 +875,9 @@ end
 else
 if WoWofEmpiresDB.disabledList[displayList[i].id] ~= true then
 if UnitInParty("player")  then
-SendChatMessage(displayList[i].id ,"PARTY");
+C_ChatInfo.SendChatMessage(displayList[i].id ,"PARTY");
 else
-SendChatMessage(displayList[i].id ,"SAY");
+C_ChatInfo.SendChatMessage(displayList[i].id ,"SAY");
 end
 end
 
@@ -1001,9 +951,9 @@ end
 else
 if WoWofEmpiresDB.disabledList[displayList2[i].id] ~= true then
 if UnitInParty("player")  then
-SendChatMessage(displayList2[i].id ,"PARTY");
+C_ChatInfo.SendChatMessage(displayList2[i].id ,"PARTY");
 else
-SendChatMessage(displayList2[i].id ,"SAY");
+C_ChatInfo.SendChatMessage(displayList2[i].id ,"SAY");
 end
 end
 
@@ -1071,63 +1021,15 @@ local levelup = CreateFrame("Frame")
 levelup:RegisterEvent("PLAYER_LEVEL_UP")
 levelup:SetScript("OnEvent", function(self, event)
 if UnitInParty("player") then
-SendChatMessage("snoop","PARTY");
+C_ChatInfo.SendChatMessage("snoop","PARTY");
 else
 --auto sending chat messages to SAY requires HW input so using emote for now.
-SendChatMessage("snoop", "EMOTE");
+C_ChatInfo.SendChatMessage("snoop", "EMOTE");
 end
 end)
 
-
-
-local editFrame = CreateFrame("EditBox", nil, ContainerFrame1, "BagSearchBoxTemplate");
-editFrame:SetPoint("TOP", ContainerFrame1, "TOP");
-editFrame:SetWidth(126);
-editFrame:SetHeight(18);
-editFrame:SetMaxLetters(15);
-hooksecurefunc("ContainerFrame_Update", function( self )
-	if self:GetID() == 0 then
-		editFrame:SetParent(self)
-		editFrame:SetPoint("TOPLEFT", self, "TOPLEFT", 55, -29)
-		editFrame.anchorBag = self
-		editFrame:Show()
-	elseif editFrame.anchorBag == self then
-		editFrame:ClearAllPoints()
-		editFrame:Hide()
-		editFrame.anchorBag = nil
-	end
-end)
-
-
---[[ DEJV AI KÅÅD ]]--
--- First, we define a function that will check if our own character's health
--- is below 30% and print "18" in party chat if it is.
-local shouldRun = true
-local function checkHealth()
-  local healthPercentage = UnitHealth("player") / UnitHealthMax("player")
-  
-  if healthPercentage >= 0.3 then 
-    shouldRun = true
-  end
-  if healthPercentage < 0.3 and shouldRun == true then
-  if UnitInParty("player") == true and not inPublicParty() then
-SendChatMessage("18", "PARTY")
-end
-    
-    -- prevent spam
-    shouldRun = false
-  end
-end
-
--- Next, we create an event listener that will call our checkHealth function
--- whenever our own character's health changes.
-local frame = CreateFrame("FRAME")
-frame:RegisterEvent("UNIT_HEALTH_FREQUENT")
-frame:SetScript("OnEvent", function(self, event, unit)
-if unit == "player" then
-  checkHealth()
-  end
-end)
+-- Removed for Forever: the custom bag search box (the backpack has one built in now)
+-- and the low-health "18" callout (UnitHealth is always a secret value to addons).
 
 --print(SpyPerCharDB["PlayerData"][playerName].kos)
 -- NOTES

@@ -1,6 +1,5 @@
-## Interface: 11404
+## Interface: 16001
 ## Title: WoWofEmpires
 ## SavedVariables: WoWofEmpiresDB,savedPortraitIndex,PortraitKungarna
 core.lua
-Portrait\Main.lua
 Portrait\Main.xml
