@@ -252,7 +252,8 @@ local function OnChat(event, text, sender)
 end
 
 for _, event in ipairs({
-	"CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE", "CHAT_MSG_WHISPER", "CHAT_MSG_GUILD",
+	-- WHISPER_INFORM is your own outgoing whisper, so the sender hears it too.
+	"CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE", "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM", "CHAT_MSG_GUILD",
 	"CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
 }) do
 	On(event, OnChat)
