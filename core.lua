@@ -307,6 +307,16 @@ On("PLAYER_UNGHOST", function()
 	EmpirePlay("born.mp3")
 end)
 
+-- You or your party killed an enemy player outside battlegrounds: Herb laughs (taunt 11).
+-- The GUID is secret in restricted content (instances), so it stays quiet there.
+On("PARTY_KILL", function(_, _, targetGUID)
+	if issecretvalue(targetGUID) or UnitInBattleground("player") then return end
+	if C_PlayerInfo.GUIDIsPlayer(targetGUID) then
+		ns.Print("VILKET NYP!!!!!!!")
+		EmpirePlay(ns.taunts[11])
+	end
+end)
+
 -- Level up: your group hears Snoop. Solo it's an emote, since /say needs a key press.
 On("PLAYER_LEVEL_UP", function()
 	C_ChatInfo.SendChatMessage("snoop", IsInGroup() and "PARTY" or "EMOTE")
