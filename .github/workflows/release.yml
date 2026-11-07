@@ -1,5 +1,6 @@
 # Pushing a tag like v2.0.1 publishes a release that WowUp picks up as an update.
-# WowUp's Forever client only takes zips named *-forever.zip.
+# WowUp's Forever client only takes zips named *-forever.zip, and it uses the zip name
+# as the version, so the tag must be in the name or WowUp never sees an update.
 name: Release
 on:
   push:
@@ -11,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: git archive --format=zip --prefix=WoWofEmpires/ -o WoWofEmpires-forever.zip HEAD
-      - run: gh release create "$GITHUB_REF_NAME" WoWofEmpires-forever.zip --repo "$GITHUB_REPOSITORY" --generate-notes
+      - run: git archive --format=zip --prefix=WoWofEmpires/ -o "WoWofEmpires-$GITHUB_REF_NAME-forever.zip" HEAD
+      - run: gh release create "$GITHUB_REF_NAME" "WoWofEmpires-$GITHUB_REF_NAME-forever.zip" --repo "$GITHUB_REPOSITORY" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
