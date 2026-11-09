@@ -60,9 +60,11 @@ ns.words = {
 	["fake news"] = "fake-news-great.mp3",
 	["fast"] = "im-fast-as-fuck-boii-2.mp3",
 	["gay"] = "hah-gay.mp3",
+	["goat"] = "Thats-why-hes-the-goat.mp3",
 	["hehehey"] = "heheheey.ogg",
 	["huuu"] = "huuuuuuu.mp3",
 	["hype"] = "Zulp Hype.ogg",
+	["lightweight"] = "Lightweight-baby.mp3",
 	["maths"] = "Quick maths.ogg",
 	["nonono"] = "mmhmmhnonono.ogg",
 	["ohnono"] = "Oh-no-no-no.mp3",
@@ -77,6 +79,7 @@ ns.words = {
 	["whyrun"] = "Why are you running.ogg",
 	["wow"] = "wow.ogg",
 	["yeboi"] = "heheyeahboy.ogg",
+	["yebuddy"] = "Yeah-buddy-lightweight.mp3",
 	["zzz"] = "zzz.ogg",
 }
 
