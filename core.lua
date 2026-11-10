@@ -269,14 +269,46 @@ end
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_BLINK)
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_KOS)
 
+-- Every copy of the addon joins this channel, so messages reach all addon users on the realm,
+-- grouped or not. Chat windows never show it (Blizzard only auto-adds regional channels).
+-- Joined a bit after login so General and Trade keep their usual /1 and /2.
+local ADDON_CHANNEL = "WoWofEmpires"
+
+On("PLAYER_LOGIN", function()
+	-- Forever's UI only uses JoinPermanentChannel; the temporary one (not saved between logins) is preferred if it's there.
+	C_Timer.After(15, function() (JoinTemporaryChannel or JoinPermanentChannel)(ADDON_CHANNEL) end)
+end)
+
+-- Sends to every addon user: the shared channel, plus your group (which can span realms).
+local function SendToAddonUsers(message)
+	local channel = GetChannelName(ADDON_CHANNEL)
+	if channel > 0 then
+		C_ChatInfo.SendAddonMessage(PREFIX_BLINK, message, "CHANNEL", tostring(channel))
+	end
+	if IsInGroup() then
+		C_ChatInfo.SendAddonMessage(PREFIX_BLINK, message, IsInRaid() and "RAID" or "PARTY")
+	end
+end
+
+-- One Snoop per player per level, however many copies of the news arrive: the channel and party
+-- both deliver it, and your own message echoes back to you.
+local announcedLevel = {}
+
+local function AnnounceLevel(name, level)
+	if announcedLevel[name] == level then return false end
+	announcedLevel[name] = level
+	PlayKey("snoop")
+	return true
+end
+
 On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
 	if issecretvalue(prefix) or issecretvalue(text) or issecretvalue(sender) then return end
 	local level = prefix == PREFIX_BLINK and text:match("^levelup:(%d+)$")
 	if level then
-		-- Your own message echoes back; you already heard Snoop when you leveled.
-		if IsMe(sender) then return end
-		PlayKey("snoop")
-		ns.Print(Ambiguate(sender, "short") .. " LEVELED UP to " .. level .. "!")
+		local name = Ambiguate(sender, "short")
+		if AnnounceLevel(name, level) then
+			ns.Print(name .. " LEVELED UP to " .. level .. "!")
+		end
 	elseif prefix == PREFIX_BLINK and text == "blinkCastSuccess" then
 		EmpirePlay("blink.ogg")
 		print("Här kan man va!")
@@ -331,10 +363,11 @@ On("PARTY_KILL", function(_, _, targetGUID)
 end)
 
 -- Level up: Snoop for you, and an addon message (not visible in chat) so everyone with the addon
--- in your group, or nearby when solo, hears it too and gets a "X LEVELED UP" line.
+-- hears it too and gets a "X LEVELED UP" line.
 On("PLAYER_LEVEL_UP", function(_, level)
-	PlayKey("snoop")
-	C_ChatInfo.SendAddonMessage(PREFIX_BLINK, "levelup:" .. level, IsInGroup() and "PARTY" or "SAY")
+	if AnnounceLevel(UnitName("player"), tostring(level)) then
+		SendToAddonUsers("levelup:" .. level)
+	end
 end)
 
 -- Low health: health is secret to addons, but Blizzard's red low-health pulse (LowHealthFrame, 35% or
