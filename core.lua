@@ -232,6 +232,14 @@ local function ShareKillOnSight()
 	ns.Print("Shared " .. #names .. " kill-on-sight name(s) with your guild: " .. table.concat(names, ", "))
 end
 
+-- Plays a trigger's sound unless you muted it in the window.
+local function PlayKey(key)
+	local file = ns.SoundFor(key)
+	if file and not ns.IsMuted(key) then
+		EmpirePlay(file)
+	end
+end
+
 local function OnChat(event, text, sender)
 	-- Forever hides chat text in restricted content (dungeons, encounters); skip those messages.
 	if issecretvalue(text) or issecretvalue(sender) then return end
@@ -247,11 +255,7 @@ local function OnChat(event, text, sender)
 		C_PartyInfo.InviteUnit(sender)
 	end
 
-	local key = tonumber(text) or lower
-	local file = ns.SoundFor(key)
-	if file and not ns.IsMuted(key) then
-		EmpirePlay(file)
-	end
+	PlayKey(tonumber(text) or lower)
 end
 
 for _, event in ipairs({
@@ -265,9 +269,15 @@ end
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_BLINK)
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_KOS)
 
-On("CHAT_MSG_ADDON", function(_, prefix, text)
-	if issecretvalue(prefix) or issecretvalue(text) then return end
-	if prefix == PREFIX_BLINK and text == "blinkCastSuccess" then
+On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
+	if issecretvalue(prefix) or issecretvalue(text) or issecretvalue(sender) then return end
+	local level = prefix == PREFIX_BLINK and text:match("^levelup:(%d+)$")
+	if level then
+		-- Your own message echoes back; you already heard Snoop when you leveled.
+		if IsMe(sender) then return end
+		PlayKey("snoop")
+		ns.Print(Ambiguate(sender, "short") .. " LEVELED UP to " .. level .. "!")
+	elseif prefix == PREFIX_BLINK and text == "blinkCastSuccess" then
 		EmpirePlay("blink.ogg")
 		print("Här kan man va!")
 	elseif prefix == PREFIX_KOS and Spy and SpyPerCharDB and not SpyPerCharDB.PlayerData[text] then
@@ -320,9 +330,11 @@ On("PARTY_KILL", function(_, _, targetGUID)
 	end
 end)
 
--- Level up: your group hears Snoop. Solo it's an emote, since /say needs a key press.
-On("PLAYER_LEVEL_UP", function()
-	C_ChatInfo.SendChatMessage("snoop", IsInGroup() and "PARTY" or "EMOTE")
+-- Level up: Snoop for you, and an addon message (not visible in chat) so everyone with the addon
+-- in your group, or nearby when solo, hears it too and gets a "X LEVELED UP" line.
+On("PLAYER_LEVEL_UP", function(_, level)
+	PlayKey("snoop")
+	C_ChatInfo.SendAddonMessage(PREFIX_BLINK, "levelup:" .. level, IsInGroup() and "PARTY" or "SAY")
 end)
 
 -- Low health: health is secret to addons, but Blizzard's red low-health pulse (LowHealthFrame, 35% or
