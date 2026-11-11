@@ -234,7 +234,7 @@ local function CreateWindow()
 
 	local hint = window:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
 	hint:SetPoint("BOTTOMLEFT", 12, 9)
-	hint:SetText("Click: play for the group.  Right-click: mute.")
+	hint:SetText("Click: play for your group.  Right-click: mute.")
 
 	SelectTab(1)
 end
@@ -244,8 +244,17 @@ function ns.ToggleWindow()
 	window:SetShown(not window:IsShown())
 end
 
+-- /woe opens the window. /woe levelup [level] fakes a level-up through the real level-up code
+-- (Snoop for you, the announcement for everyone else with the addon), for testing.
 SLASH_WOWOFEMPIRES1 = "/woe"
-SlashCmdList.WOWOFEMPIRES = ns.ToggleWindow
+SlashCmdList.WOWOFEMPIRES = function(msg)
+	local level = msg:match("^levelup%s*(%d*)$")
+	if level then
+		ns.Fire("PLAYER_LEVEL_UP", tonumber(level) or UnitLevel("player") + 1)
+	else
+		ns.ToggleWindow()
+	end
+end
 
 ------------------------------------------------------------------------
 -- Minimap button: click opens, right-click stops sounds, drag moves it around the minimap.

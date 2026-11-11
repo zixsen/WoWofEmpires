@@ -98,10 +98,15 @@ local PLAYER_AURA_SOUNDS = {
 local eventFrame = CreateFrame("Frame")
 local handlers = {}
 
-eventFrame:SetScript("OnEvent", function(_, event, ...)
-	for _, handler in ipairs(handlers[event]) do
+-- Runs an event's handlers. Also exposed as ns.Fire so /woe levelup can fake a level-up.
+function ns.Fire(event, ...)
+	for _, handler in ipairs(handlers[event] or {}) do
 		handler(event, ...)
 	end
+end
+
+eventFrame:SetScript("OnEvent", function(_, event, ...)
+	ns.Fire(event, ...)
 end)
 
 function ns.On(event, handler, ...)
@@ -167,10 +172,6 @@ function ns.SetMuted(key, muted)
 	ns.db.disabledList[key] = muted or nil
 end
 
--- Says the trigger in party (or /say when solo) so everyone with the addon hears it.
-function ns.Broadcast(key)
-	C_ChatInfo.SendChatMessage(tostring(key), IsInGroup() and "PARTY" or "SAY")
-end
 
 -- "Oh-no-no-no.mp3" -> "Oh no no no"
 function ns.LabelFor(file)
@@ -184,8 +185,14 @@ end
 ------------------------------------------------------------------------
 -- Chat triggers
 ------------------------------------------------------------------------
+-- Forever names can have a surname. UnitName("player") returns it as a second value ("Döds",
+-- "Maskinen"), while chat and addon messages carry the joined name ("Döds Maskinen").
+local function MyName()
+	return NameUtil.GetUnmodifiedUnitFullName("player")
+end
+
 local function IsMe(sender)
-	return Ambiguate(sender, "short") == UnitName("player")
+	return Ambiguate(sender, "short") == MyName()
 end
 
 local function IsFriend(name)
@@ -279,24 +286,41 @@ On("PLAYER_LOGIN", function()
 	C_Timer.After(15, function() (JoinTemporaryChannel or JoinPermanentChannel)(ADDON_CHANNEL) end)
 end)
 
+-- Addon messages never show up in chat; only players with the addon receive them.
+-- Sends to your party or raid. Returns false when you're not in a group.
+local function SendToGroup(message)
+	if not IsInGroup() then return false end
+	C_ChatInfo.SendAddonMessage(PREFIX_BLINK, message, IsInRaid() and "RAID" or "PARTY")
+	return true
+end
+
 -- Sends to every addon user: the shared channel, plus your group (which can span realms).
 local function SendToAddonUsers(message)
 	local channel = GetChannelName(ADDON_CHANNEL)
 	if channel > 0 then
 		C_ChatInfo.SendAddonMessage(PREFIX_BLINK, message, "CHANNEL", tostring(channel))
 	end
-	if IsInGroup() then
-		C_ChatInfo.SendAddonMessage(PREFIX_BLINK, message, IsInRaid() and "RAID" or "PARTY")
+	SendToGroup(message)
+end
+
+-- Window click: plays the sound for you and your group, or for everyone with the addon when solo.
+function ns.Broadcast(key)
+	PlayKey(key)
+	if not SendToGroup("play:" .. key) then
+		SendToAddonUsers("play:" .. key)
 	end
 end
 
 -- One Snoop per player per level, however many copies of the news arrive: the channel and party
--- both deliver it, and your own message echoes back to you.
-local announcedLevel = {}
+-- both deliver it, and your own message echoes back to you. Copies arrive within a second, so
+-- anything after 10 seconds counts as new (that's what lets /woe levelup be repeated).
+local announcedAt = {}
 
 local function AnnounceLevel(name, level)
-	if announcedLevel[name] == level then return false end
-	announcedLevel[name] = level
+	local key = name .. ":" .. level
+	local last = announcedAt[key]
+	if last and GetTime() - last < 10 then return false end
+	announcedAt[key] = GetTime()
 	PlayKey("snoop")
 	return true
 end
@@ -304,11 +328,15 @@ end
 On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
 	if issecretvalue(prefix) or issecretvalue(text) or issecretvalue(sender) then return end
 	local level = prefix == PREFIX_BLINK and text:match("^levelup:(%d+)$")
+	local key = prefix == PREFIX_BLINK and text:match("^play:(.+)$")
 	if level then
 		local name = Ambiguate(sender, "short")
 		if AnnounceLevel(name, level) then
 			ns.Print(name .. " LEVELED UP to " .. level .. "!")
 		end
+	elseif key then
+		-- The sender already played it for themselves.
+		if not IsMe(sender) then PlayKey(tonumber(key) or key) end
 	elseif prefix == PREFIX_BLINK and text == "blinkCastSuccess" then
 		EmpirePlay("blink.ogg")
 		print("Här kan man va!")
@@ -365,23 +393,20 @@ end)
 -- Level up: Snoop for you, and an addon message (not visible in chat) so everyone with the addon
 -- hears it too and gets a "X LEVELED UP" line.
 On("PLAYER_LEVEL_UP", function(_, level)
-	if AnnounceLevel(UnitName("player"), tostring(level)) then
+	if AnnounceLevel(MyName(), tostring(level)) then
 		SendToAddonUsers("levelup:" .. level)
 	end
 end)
 
 -- Low health: health is secret to addons, but Blizzard's red low-health pulse (LowHealthFrame, 35% or
--- less) is not. Each time it starts, ask your group for a monk ("18"). Only when everyone in the party
--- is a friend, and not where Forever blocks addon chat (dungeons, raids, encounters, PvP).
+-- less) is not. Each time it starts, you hear "I need a monk" (18), and so does everyone with the
+-- addon in your group. Forever blocks addon messages during boss fights, so only you hear it there.
 -- ponytail: rides on Blizzard's flash, so it stays silent if "Flash screen at low health" is turned off.
 LowHealthFrame:HookScript("OnShow", function()
 	-- The same frame also flashes in combat behind full-screen panels; that isn't low health.
-	if GetUIPanel("fullscreen") or not IsInGroup() or C_ChatInfo.InChatMessagingLockdown() then return end
-	for i = 1, GetNumSubgroupMembers() do
-		local name = UnitName("party" .. i)
-		if not name or issecretvalue(name) or not IsFriend(name) then return end
-	end
-	C_ChatInfo.SendChatMessage("18", "PARTY")
+	if GetUIPanel("fullscreen") then return end
+	PlayKey(18)
+	SendToGroup("play:18")
 end)
 
 -- "Out of range": swap the default error voice for alternating "too far away" clips.
