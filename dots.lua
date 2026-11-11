@@ -72,10 +72,12 @@ local function RemainingOn(unit)
 	return damage
 end
 
--- "40 Fire damage over 15 sec" -> 40, Fire's school mask, 15. Area spells aren't single-target DoTs.
+-- "40 Fire damage over 15 sec" -> 40, Fire's school mask, 15. Area spells aren't single-target DoTs,
+-- and Renew ("Heals the target of 222 damage over 15 sec") is a heal.
 local function ParseDot(spellID)
 	local text = C_Spell.GetSpellDescription(spellID)
-	if not text or issecretvalue(text) or text:find("area") or text:find("all enemies") or text:find("nearby") then return end
+	if not text or issecretvalue(text) or text:find("^Heals") then return end
+	if text:find("area") or text:find("all enemies") or text:find("nearby") then return end
 	local amount, school, duration = text:match("(%d+) (%a*) ?damage over (%d+) sec")
 	if amount then return tonumber(amount), SCHOOL_MASK[school] or 1, tonumber(duration) end
 end
@@ -221,24 +223,26 @@ local function Update(o, unit)
 	end
 end
 
--- Target frame. Forever draws parts of the target frame over its own health bar, so the overlay sits
--- on UIParent above the frame's highest shown part (as DoesItDie does). Hidden layer values are skipped.
+-- Target frame. Its parts are drawn over its own health bar, and it's a "toplevel" frame that WoW
+-- raises above its strata whenever it's shown or clicked, so matching its level isn't enough. The
+-- overlay sits on UIParent one whole strata above the target frame's highest part (LOW -> MEDIUM),
+-- at the bottom of that strata so open windows still cover it. Hidden strata values are skipped.
+local STRATA_ORDER = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
 local target
 
 local function RaiseAboveTargetFrame()
-	local topStrata, topLevel = "BACKGROUND", 0
+	local top = STRATA_RANK.LOW
 	local function Visit(frame, depth)
-		local strata, level = frame:GetFrameStrata(), frame:GetFrameLevel()
-		if frame:IsShown() and not issecretvalue(strata) and not issecretvalue(level) and STRATA_RANK[strata] then
-			local rank, top = STRATA_RANK[strata], STRATA_RANK[topStrata]
-			if rank > top or (rank == top and level > topLevel) then topStrata, topLevel = strata, level end
+		local strata = frame:GetFrameStrata()
+		if frame:IsShown() and not issecretvalue(strata) and STRATA_RANK[strata] then
+			top = math.max(top, STRATA_RANK[strata])
 		end
 		if depth < 6 then
 			for _, child in ipairs({ frame:GetChildren() }) do Visit(child, depth + 1) end
 		end
 	end
 	Visit(TargetFrame, 0)
-	SetLayer(target, topStrata, topLevel)
+	SetLayer(target, STRATA_ORDER[math.min(top + 1, #STRATA_ORDER)], 0)
 end
 
 local function CreateTargetOverlay()
@@ -309,6 +313,15 @@ function ns.DotsDebug()
 	if not target then return ns.Print("Target frame overlay wasn't created.") end
 	ns.Print(("Target overlay shown %s, visible %s, strata %s, level %s"):format(Show(target.clip:IsShown()),
 		Show(target.clip:IsVisible()), Show(target.marker:GetFrameStrata()), Show(target.marker:GetFrameLevel())))
+	-- Screen positions, to rule out the overlay sitting somewhere other than on the bar.
+	local function Rect(frame)
+		local ok, text = pcall(function()
+			local s = frame:GetEffectiveScale()
+			return ("%.0f,%.0f %.0fx%.0f"):format(frame:GetLeft() * s, frame:GetBottom() * s, frame:GetWidth() * s, frame:GetHeight() * s)
+		end)
+		return ok and text or "hidden"
+	end
+	ns.Print(("Health bar at %s, overlay at %s"):format(Rect(target.bar), Rect(target.clip)))
 	ns.Print("Painting a test overlay on the target frame for 5 seconds...")
 	testUntil = GetTime() + 5
 end
