@@ -131,6 +131,27 @@ local function BuildSettingsPage(page)
 		local volume = tonumber(C_CVar.GetCVar("Sound_DialogVolume")) or 1
 		slider:Init(volume, 0, 1, 20, { [MinimalSliderWithSteppersMixin.Label.Right] = Percent })
 	end)
+
+	CreateHeader(page, 16, -244, "Messages")
+	local chatNote = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	chatNote:SetPoint("TOPLEFT", 16, -266)
+	chatNote:SetText("Chat tab for level-ups and other addon messages.")
+
+	-- Lists the chat tabs that are open right now; rebuilt every time it's opened.
+	local chatTab = CreateFrame("DropdownButton", nil, page, "WowStyle1DropdownTemplate")
+	chatTab:SetPoint("TOPLEFT", 16, -284)
+	chatTab:SetWidth(200)
+	chatTab:SetupMenu(function(_, root)
+		for id = 1, Constants.ChatFrameConstants.MaxChatWindows do
+			local name, _, _, _, _, _, shown, _, docked = GetChatWindowInfo(id)
+			if name and name ~= "" and (shown or docked) then
+				root:CreateRadio(name, function() return ns.db.chatFrame == id end, function()
+					ns.db.chatFrame = id
+					ns.Print("Messages will show up in this tab.")
+				end)
+			end
+		end
+	end)
 end
 
 ------------------------------------------------------------------------

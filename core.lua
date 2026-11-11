@@ -11,6 +11,7 @@ ns.defaults = {
 	repair = false,
 	autoInv = false,
 	minimapAngle = 200,
+	chatFrame = 1, -- chat tab for the addon's messages (1 = the main tab)
 }
 
 -- Saying the number (taunts) or the word (sound bites) in chat plays it for everyone with the addon.
@@ -178,8 +179,12 @@ function ns.LabelFor(file)
 	return (file:gsub("%.%a+$", ""):gsub("[_-]", " "))
 end
 
+-- Prints in the chat tab picked in Settings, or the main tab if that tab has been closed.
 function ns.Print(message)
-	print("|cffffd100WoW of Empires:|r " .. message)
+	local id = ns.db and ns.db.chatFrame or 1
+	local shown, _, docked = select(7, GetChatWindowInfo(id))
+	local frame = (shown or docked) and _G["ChatFrame" .. id] or DEFAULT_CHAT_FRAME
+	frame:AddMessage("|cffffd100WoW of Empires:|r " .. message)
 end
 
 ------------------------------------------------------------------------
@@ -339,7 +344,7 @@ On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
 		if not IsMe(sender) then PlayKey(tonumber(key) or key) end
 	elseif prefix == PREFIX_BLINK and text == "blinkCastSuccess" then
 		EmpirePlay("blink.ogg")
-		print("Här kan man va!")
+		ns.Print("Här kan man va!")
 	elseif prefix == PREFIX_KOS and Spy and SpyPerCharDB and not SpyPerCharDB.PlayerData[text] then
 		Spy:ToggleKOSPlayer(true, text)
 	end
