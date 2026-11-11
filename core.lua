@@ -308,6 +308,9 @@ local function SendToAddonUsers(message)
 	SendToGroup(message)
 end
 
+-- For dots.lua, which shares DoT casts with the group.
+ns.PREFIX, ns.SendToGroup, ns.IsMe = PREFIX_BLINK, SendToGroup, IsMe
+
 -- Window click: plays the sound for you and your group, or for everyone with the addon when solo.
 function ns.Broadcast(key)
 	PlayKey(key)

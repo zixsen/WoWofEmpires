@@ -115,13 +115,16 @@ local function BuildSettingsPage(page)
 		function() return C_CVar.GetCVarBool("displayFreeBagSlots") end,
 		function(on) C_CVar.SetCVar("displayFreeBagSlots", on and "1" or "0") end)
 
-	CreateHeader(page, 16, -160, "Volume")
+	CreateHeader(page, 16, -150, "Combat")
+	CreateCheckbox(page, -174, "Show when DoTs will kill (target frame and nameplates)", SavedOption("dotMarker"))
+
+	CreateHeader(page, 16, -214, "Volume")
 	local note = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	note:SetPoint("TOPLEFT", 16, -182)
+	note:SetPoint("TOPLEFT", 16, -236)
 	note:SetText("Sounds play on the game's Dialog channel.")
 
 	local slider = CreateFrame("Frame", nil, page, "MinimalSliderWithSteppersTemplate")
-	slider:SetPoint("TOPLEFT", 12, -198)
+	slider:SetPoint("TOPLEFT", 12, -252)
 	slider:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(_, value)
 		C_CVar.SetCVar("Sound_DialogVolume", value)
 	end, slider)
@@ -132,14 +135,14 @@ local function BuildSettingsPage(page)
 		slider:Init(volume, 0, 1, 20, { [MinimalSliderWithSteppersMixin.Label.Right] = Percent })
 	end)
 
-	CreateHeader(page, 16, -244, "Messages")
+	CreateHeader(page, 16, -296, "Messages")
 	local chatNote = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	chatNote:SetPoint("TOPLEFT", 16, -266)
+	chatNote:SetPoint("TOPLEFT", 16, -318)
 	chatNote:SetText("Chat tab for level-ups and other addon messages.")
 
 	-- Lists the chat tabs that are open right now; rebuilt every time it's opened.
 	local chatTab = CreateFrame("DropdownButton", nil, page, "WowStyle1DropdownTemplate")
-	chatTab:SetPoint("TOPLEFT", 16, -284)
+	chatTab:SetPoint("TOPLEFT", 16, -336)
 	chatTab:SetWidth(200)
 	chatTab:SetupMenu(function(_, root)
 		for id = 1, Constants.ChatFrameConstants.MaxChatWindows do
@@ -272,6 +275,8 @@ SlashCmdList.WOWOFEMPIRES = function(msg)
 	local level = msg:match("^levelup%s*(%d*)$")
 	if level then
 		ns.Fire("PLAYER_LEVEL_UP", tonumber(level) or UnitLevel("player") + 1)
+	elseif msg == "dots" then
+		ns.DotsDebug()
 	else
 		ns.ToggleWindow()
 	end
