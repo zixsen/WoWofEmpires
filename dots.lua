@@ -23,6 +23,7 @@ local AVOIDED = { MISS = true, RESIST = true, IMMUNE = true, DODGE = true, PARRY
 -- (instances): then only your own DoTs on your current target are tracked. owner is "me:<spellID>"
 -- or "<groupmate>:<spellID>".
 local dots = {}
+local plates = {} -- [nameplate unit] = its overlay, for the enemy nameplates on screen
 
 -- The key DoTs are kept under for a hostile unit (default: your target). Without GUIDs only the
 -- target has one, so a nameplate only finds DoTs there if it's your target's.
@@ -38,7 +39,8 @@ local function MobKey(unit)
 	if not issecretvalue(isTarget) and isTarget then return "target" end
 end
 
-local function AddDot(mob, owner, total, duration)
+-- started: when the DoT was cast (default now), for groupmates' DoTs matched a moment late.
+local function AddDot(mob, owner, total, duration, started)
 	local now = GetTime()
 	for key, list in pairs(dots) do -- drop expired DoTs on every mob while we're here
 		for who, dot in pairs(list) do
@@ -47,7 +49,7 @@ local function AddDot(mob, owner, total, duration)
 		if next(list) == nil then dots[key] = nil end
 	end
 	dots[mob] = dots[mob] or {}
-	dots[mob][owner] = { total = total, duration = duration, ends = now + duration }
+	dots[mob][owner] = { total = total, duration = duration, ends = (started or now) + duration }
 end
 
 local function RemoveDot(mob, owner)
@@ -72,11 +74,12 @@ local function RemainingOn(unit)
 	return damage
 end
 
--- "40 Fire damage over 15 sec" -> 40, Fire's school mask, 15. Area spells aren't single-target DoTs,
--- and Renew ("Heals the target of 222 damage over 15 sec") is a heal.
+-- "40 Fire damage over 15 sec" -> 40, Fire's school mask, 15. Not DoTs on your target, though the
+-- wording matches (checked against every Forever damage tooltip): area spells, Renew ("Heals the
+-- target of 222 damage over 15 sec"), weapon poisons ("Coats a weapon...") and Immolation Trap.
 local function ParseDot(spellID)
 	local text = C_Spell.GetSpellDescription(spellID)
-	if not text or issecretvalue(text) or text:find("^Heals") then return end
+	if not text or issecretvalue(text) or text:find("^Heals") or text:find("^Coats a weapon") or text:find("trap") then return end
 	if text:find("area") or text:find("all enemies") or text:find("nearby") then return end
 	local amount, school, duration = text:match("(%d+) (%a*) ?damage over (%d+) sec")
 	if amount then return tonumber(amount), SCHOOL_MASK[school] or 1, tonumber(duration) end
@@ -85,6 +88,13 @@ end
 ------------------------------------------------------------------------
 -- Your casts
 ------------------------------------------------------------------------
+-- A player's raw threat on a mob, or nil when they're not on its threat list (or it's hidden).
+-- The server sends every client the same numbers, so it can tell mobs apart across clients.
+local function ThreatOf(unit, mobUnit)
+	local _, _, _, _, threat = UnitDetailedThreatSituation(unit, mobUnit)
+	if threat ~= nil and not issecretvalue(threat) then return threat end
+end
+
 -- The DoT belongs to the mob targeted when the cast started: by the time an instant lands you may
 -- have tabbed to the next one.
 local sentTarget = {}
@@ -107,8 +117,21 @@ ns.On("UNIT_SPELLCAST_SUCCEEDED", function(_, _, castGUID, spellID)
 	AddDot(mob, "me:" .. spellID, total, duration)
 	lastCast = { mob = mob, spellID = spellID, school = school, time = GetTime() }
 	if mob ~= "target" then
-		ns.SendToGroup(("dot:%s:%d:%d:%d"):format(mob, spellID, total, duration))
+		-- Your threat on the mob lets groupmates find it on their screens (-1: not on its list yet).
+		local threat = MobKey("target") == mob and ThreatOf("player", "target") or -1
+		ns.SendToGroup(("dot:%s:%d:%d:%d:%d"):format(mob, spellID, total, duration, threat))
 	end
+end, "player")
+
+-- Channels (Mind Flay, Drain Soul, Starshards) aren't DoTs. The cast check above skips them when the
+-- channel has already started; if the channel start comes after the cast event, take it back here.
+ns.On("UNIT_SPELLCAST_CHANNEL_START", function(_, _, _, spellID)
+	if issecretvalue(spellID) or not lastCast or lastCast.spellID ~= spellID then return end
+	RemoveDot(lastCast.mob, "me:" .. spellID)
+	if lastCast.mob ~= "target" then
+		ns.SendToGroup(("undot:%s:%d"):format(lastCast.mob, spellID))
+	end
+	lastCast = nil
 end, "player")
 
 -- A miss/resist/immune in the DoT's school right after casting it means it never landed.
@@ -129,17 +152,228 @@ ns.On("PLAYER_TARGET_CHANGED", function() dots.target = nil end)
 ------------------------------------------------------------------------
 -- Groupmates' casts (addon messages; Forever blocks these during boss fights)
 ------------------------------------------------------------------------
+-- Forever gives every player their own IDs for mobs (the same mob showed different IDs on two
+-- clients), so a groupmate's "Corruption on <their ID>" can't be looked up directly. Which of your
+-- mobs it is gets worked out from what both clients see, best signal first:
+--   1. threat: the message carries their threat on the mob; the mob where their threat (readable
+--      on your side, same number as on theirs) has that value is theirs.
+--   2. threat list: on a fresh mob they had no threat yet; the mob whose threat list they join as
+--      the message arrives is theirs.
+--   3. debuffs: the mob where a debuff that isn't yours appears as the message arrives. Anyone's
+--      debuff counts, so it's the weakest; with two candidates their current target decides.
+-- A match is remembered for their later messages about that mob (recasts, misses). Only mobs with
+-- a nameplate on your screen, or your target, can be matched.
+local MATCH_WINDOW = 1 -- seconds between their message and what you see happen
+local THREAT_TOLERANCE = 0.15 -- their threat moves a little between their measurement and yours
+local aliases = {} -- [their mob ID] = your key for that mob
+local auraIDs = {} -- [unit] = set of its debuff instance numbers last seen
+local onThreatList = {} -- [unit] = set of groupmates on its threat list
+local fresh = {} -- debuffs that just appeared and aren't yours: { mob, time, used }
+local joined = {} -- groupmates who just joined a mob's threat list: { mob, who, time, used }
+local pending = {} -- their DoTs waiting for a match: { theirs, who, owner, total, duration, threat, time }
+local matchLog = {} -- last few matching decisions, for /woe dots
+
+local function Log(text)
+	table.insert(matchLog, ("%.1f %s"):format(GetTime(), text))
+	if #matchLog > 6 then table.remove(matchLog, 1) end
+end
+
+-- Your groupmates as { unit = "party1", name = "First Last" } (the name as their messages carry it).
+local function GroupMembers()
+	local members, raid = {}, IsInRaid()
+	local me = NameUtil.GetUnmodifiedUnitFullName("player")
+	for i = 1, raid and GetNumGroupMembers() or GetNumSubgroupMembers() do
+		local unit = (raid and "raid" or "party") .. i
+		local ok, name = pcall(NameUtil.GetUnmodifiedUnitFullName, unit)
+		if ok and name and not issecretvalue(name) and name ~= me then
+			table.insert(members, { unit = unit, name = name })
+		end
+	end
+	return members
+end
+
+local function GroupUnit(name)
+	for _, member in ipairs(GroupMembers()) do
+		if member.name == name then return member.unit end
+	end
+end
+
+local function MobUnits()
+	local units = { "target" }
+	for unit in pairs(plates) do table.insert(units, unit) end
+	return units
+end
+
+-- 1: the mob where their threat is close to what they reported, and clearly closer than any other.
+local function MatchByThreat(p)
+	if not p.threat or p.threat < 0 then return end
+	local unit = GroupUnit(p.who)
+	if not unit then return end
+	local best, bestErr, secondErr, seen = nil, nil, nil, {}
+	for _, mobUnit in ipairs(MobUnits()) do
+		local mob = MobKey(mobUnit)
+		local threat = mob and not seen[mob] and ThreatOf(unit, mobUnit)
+		if threat then
+			seen[mob] = true
+			local err = math.abs(threat - p.threat) / math.max(p.threat, threat, 100)
+			if not bestErr or err < bestErr then
+				best, secondErr, bestErr = mob, bestErr, err
+			elseif not secondErr or err < secondErr then
+				secondErr = err
+			end
+		end
+	end
+	if best and bestErr <= THREAT_TOLERANCE and (not secondErr or secondErr > 2 * bestErr + 0.05) then return best end
+end
+
+-- The mobs with an unused event within the window of the message (only theirs, if who is given).
+local function Candidates(events, p, who)
+	local mobs, count = {}, 0
+	for _, event in ipairs(events) do
+		if not event.used and (not who or event.who == who) and math.abs(event.time - p.time) <= MATCH_WINDOW
+			and not mobs[event.mob] then
+			mobs[event.mob] = event
+			count = count + 1
+		end
+	end
+	return mobs, count
+end
+
+local function TryMatch()
+	local now = GetTime()
+	for i = #pending, 1, -1 do
+		local p = pending[i]
+		local mob, how = MatchByThreat(p), "threat"
+		if not mob then -- 2
+			local mobs, count = Candidates(joined, p, p.who)
+			if count == 1 then
+				mob, how = next(mobs), "joining the threat list"
+				mobs[mob].used = true
+			end
+		end
+		if not mob then -- 3
+			local mobs, count = Candidates(fresh, p)
+			if count == 1 then
+				mob = next(mobs)
+			elseif count > 1 then
+				local unit = GroupUnit(p.who)
+				local theirTarget = unit and MobKey(unit .. "target")
+				if theirTarget and mobs[theirTarget] then mob = theirTarget end
+			end
+			if mob then
+				mobs[mob].used = true
+				how = ("a new debuff (%d candidate%s)"):format(count, count > 1 and "s" or "")
+			end
+		end
+		if mob then
+			if mob ~= "target" then aliases[p.theirs] = mob end -- "target" moves with your target
+			AddDot(mob, p.owner, p.total, p.duration, p.time)
+			Log(("matched %s's %s by %s"):format(p.who, p.owner:match("%d+$"), how))
+			table.remove(pending, i)
+		elseif now - p.time > MATCH_WINDOW then
+			Log(("no match for %s's %s"):format(p.who, p.owner:match("%d+$")))
+			table.remove(pending, i)
+		end
+	end
+	for _, events in ipairs({ fresh, joined }) do
+		for i = #events, 1, -1 do
+			if now - events[i].time > 3 * MATCH_WINDOW then table.remove(events, i) end
+		end
+	end
+end
+
+-- Notes groupmates who weren't on the unit's threat list before. quiet: just learn who's on it.
+local function ScanThreat(unit, quiet)
+	local before, now, any = onThreatList[unit] or {}, {}, false
+	for _, member in ipairs(GroupMembers()) do
+		if ThreatOf(member.unit, unit) then
+			now[member.name] = true
+			local mob = not quiet and not before[member.name] and MobKey(unit)
+			if mob then
+				table.insert(joined, { mob = mob, who = member.name, time = GetTime() })
+				any = true
+			end
+		end
+	end
+	onThreatList[unit] = now
+	if any then TryMatch() end
+end
+
+-- Notes debuffs on the unit that weren't there before and aren't yours. quiet: just learn what's
+-- there (a nameplate that just appeared, a new target).
+local function ScanAuras(unit, quiet)
+	local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, unit, "HARMFUL")
+	if not ok or type(ids) ~= "table" or issecretvalue(ids) then return end
+	local before, now, appeared = auraIDs[unit] or {}, {}, false
+	for _, id in ipairs(ids) do
+		if not issecretvalue(id) then
+			now[id] = true
+			if not quiet and not before[id] then
+				local okFilter, notMine = pcall(C_UnitAuras.IsAuraFilteredOutByInstanceID, unit, id, "HARMFUL|PLAYER")
+				if okFilter and not issecretvalue(notMine) and notMine then appeared = true end
+			end
+		end
+	end
+	auraIDs[unit] = now
+	local mob = appeared and MobKey(unit)
+	if mob then
+		table.insert(fresh, { mob = mob, time = GetTime() })
+		TryMatch()
+	end
+end
+
+-- Its own frame: core.lua's UNIT_AURA handler only listens to the target.
+local watcher = CreateFrame("Frame")
+watcher:RegisterEvent("UNIT_AURA")
+watcher:RegisterEvent("UNIT_THREAT_LIST_UPDATE")
+watcher:SetScript("OnEvent", function(_, event, unit)
+	if unit ~= "target" and not plates[unit] then return end
+	if event == "UNIT_AURA" then ScanAuras(unit) else ScanThreat(unit) end
+end)
+ns.On("PLAYER_TARGET_CHANGED", function()
+	ScanAuras("target", true)
+	ScanThreat("target", true)
+end)
+ns.On("PLAYER_REGEN_ENABLED", function() -- a fight's matches end with it
+	wipe(aliases)
+	wipe(fresh)
+	wipe(joined)
+end)
+
+-- Their ID is used as-is if a mob you can see has it (in case IDs ever do match).
+local function Seen(theirs)
+	if MobKey("target") == theirs then return true end
+	for unit in pairs(plates) do
+		if MobKey(unit) == theirs then return true end
+	end
+end
+
 ns.On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
 	if issecretvalue(prefix) or issecretvalue(text) or issecretvalue(sender) then return end
 	if prefix ~= ns.PREFIX or ns.IsMe(sender) then return end
 	local who = Ambiguate(sender, "short")
-	local mob, spellID, total, duration = text:match("^dot:([^:]+):(%d+):(%d+):(%d+)$")
-	if mob then
-		AddDot(mob, who .. ":" .. spellID, tonumber(total), tonumber(duration))
+	-- The threat field is new; older versions send the message without it.
+	local theirs, spellID, total, duration, threat = text:match("^dot:([^:]+):(%d+):(%d+):(%d+):?(%-?%d*)$")
+	if theirs then
+		local owner = who .. ":" .. spellID
+		local mob = aliases[theirs] or (Seen(theirs) and theirs)
+		if mob then
+			AddDot(mob, owner, tonumber(total), tonumber(duration))
+		else
+			table.insert(pending, { theirs = theirs, who = who, owner = owner, total = tonumber(total),
+				duration = tonumber(duration), threat = tonumber(threat), time = GetTime() })
+			TryMatch()
+		end
 		return
 	end
-	mob, spellID = text:match("^undot:([^:]+):(%d+)$")
-	if mob then RemoveDot(mob, who .. ":" .. spellID) end
+	theirs, spellID = text:match("^undot:([^:]+):(%d+)$")
+	if theirs then
+		local owner = who .. ":" .. spellID
+		RemoveDot(aliases[theirs] or theirs, owner)
+		for i = #pending, 1, -1 do
+			if pending[i].theirs == theirs and pending[i].owner == owner then table.remove(pending, i) end
+		end
+	end
 end)
 
 ------------------------------------------------------------------------
@@ -256,8 +490,6 @@ end
 -- Nameplates: Blizzard reuses plate frames, so each gets one overlay, parented to the plate and a few
 -- levels above its health bar. Plates Forever forbids to addons come back nil and are skipped.
 local overlayByPlate = {}
-local plates = {} -- [nameplate unit] = overlay, for the plates on screen
-
 ns.On("NAME_PLATE_UNIT_ADDED", function(_, unit)
 	local plate = C_NamePlate.GetNamePlateForUnit(unit)
 	local bar = plate and plate.UnitFrame and plate.UnitFrame.healthBar
@@ -271,9 +503,13 @@ ns.On("NAME_PLATE_UNIT_ADDED", function(_, unit)
 	local level = bar:GetFrameLevel()
 	SetLayer(o, nil, (issecretvalue(level) and 10 or level) + 5)
 	plates[unit] = o
+	ScanAuras(unit, true) -- debuffs and threat already on it aren't new
+	ScanThreat(unit, true)
 end)
 
 ns.On("NAME_PLATE_UNIT_REMOVED", function(_, unit)
+	auraIDs[unit] = nil
+	onThreatList[unit] = nil
 	if plates[unit] then
 		plates[unit].clip:Hide()
 		plates[unit] = nil
@@ -284,6 +520,7 @@ local testUntil -- /woe dots paints fixed values on the target frame until this 
 local raisedAt = 0
 
 local function Refresh()
+	if #pending > 0 then TryMatch() end -- lets unmatched messages expire
 	for unit, o in pairs(plates) do Update(o, unit) end
 	if not target then return end
 	-- Blizzard can re-layer the target frame at any time; check once a second.
@@ -302,14 +539,28 @@ end
 -- values on the target frame, to tell a drawing problem from a hidden-values one.
 function ns.DotsDebug()
 	local function Show(v) return issecretvalue(v) and "hidden" or tostring(v) end
-	local mob = MobKey()
-	ns.Print(("Target key %s, remaining DoT damage %d"):format(tostring(mob), RemainingOn("target")))
-	for owner, dot in pairs(mob and dots[mob] or {}) do
-		ns.Print(("  %s: %d over %ds, %.1fs left"):format(owner, dot.total, dot.duration, dot.ends - GetTime()))
+	-- Mob IDs shortened to their last three parts: zone copy, creature type, the individual mob.
+	local function Short(id)
+		if not id then return "none" end
+		if issecretvalue(id) then return "hidden" end
+		return id:match("%-(%d+%-%d+%-%x+)$") or id
 	end
-	local count = 0
-	for _ in pairs(plates) do count = count + 1 end
-	ns.Print(("Nameplates with an overlay: %d"):format(count))
+	local now = GetTime()
+	ns.Print(("Target %s, remaining DoT damage %d"):format(Short(MobKey()), RemainingOn("target")))
+	ns.Print("Tracked DoTs (yours and your group's):")
+	for mob, list in pairs(dots) do
+		for owner, dot in pairs(list) do
+			ns.Print(("  %s on %s: %d over %ds, %.1fs left"):format(owner, Short(mob), dot.total, dot.duration, dot.ends - now))
+		end
+	end
+	ns.Print("Enemy nameplates on screen:")
+	for unit in pairs(plates) do
+		ns.Print(("  %s: %s, remaining DoT damage %d"):format(unit, Short(MobKey(unit) or UnitGUID(unit)), RemainingOn(unit)))
+	end
+	local matched = 0
+	for _ in pairs(aliases) do matched = matched + 1 end
+	ns.Print(("Groupmates' mobs matched this fight: %d, messages waiting: %d. Recent matching:"):format(matched, #pending))
+	for _, line in ipairs(matchLog) do ns.Print("  " .. line) end
 	if not target then return ns.Print("Target frame overlay wasn't created.") end
 	ns.Print(("Target overlay shown %s, visible %s, strata %s, level %s"):format(Show(target.clip:IsShown()),
 		Show(target.clip:IsVisible()), Show(target.marker:GetFrameStrata()), Show(target.marker:GetFrameLevel())))
