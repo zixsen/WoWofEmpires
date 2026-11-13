@@ -313,8 +313,15 @@ end
 ns.PREFIX, ns.SendToGroup, ns.IsMe = PREFIX_BLINK, SendToGroup, IsMe
 
 -- Window click: plays the sound for you and your group, or for everyone with the addon when solo.
+-- "Döds Maskinen played Zulp Hype (hype)" in the addon's chat tab, for the clicker and everyone who hears it.
+local function SoundLine(name, key)
+	local file = ns.SoundFor(key)
+	ns.Print(("%s played %s (%s)"):format(name, file and ns.LabelFor(file) or key, key))
+end
+
 function ns.Broadcast(key)
 	PlayKey(key)
+	SoundLine(MyName(), key)
 	if not SendToGroup("play:" .. key) then
 		SendToAddonUsers("play:" .. key)
 	end
@@ -344,8 +351,17 @@ On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
 			ns.Print(name .. " LEVELED UP to " .. level .. "!")
 		end
 	elseif key then
-		-- The sender already played it for themselves.
-		if not IsMe(sender) then PlayKey(tonumber(key) or key) end
+		-- The sender already played it and printed the line for themselves.
+		if not IsMe(sender) then
+			key = tonumber(key) or key
+			PlayKey(key)
+			SoundLine(Ambiguate(sender, "short"), key)
+		end
+	elseif prefix == PREFIX_BLINK and text == "lowhp" then
+		if not IsMe(sender) then
+			PlayKey(18)
+			ns.Print(Ambiguate(sender, "short") .. " needs a monk!")
+		end
 	elseif prefix == PREFIX_BLINK and text == "blinkCastSuccess" then
 		EmpirePlay("blink.ogg")
 		ns.Print("Här kan man va!")
@@ -415,7 +431,10 @@ LowHealthFrame:HookScript("OnShow", function()
 	-- The same frame also flashes in combat behind full-screen panels; that isn't low health.
 	if GetUIPanel("fullscreen") then return end
 	PlayKey(18)
-	SendToGroup("play:18")
+	ns.Print(MyName() .. " needs a monk!")
+	-- Its own message, so it reads "X needs a monk!" rather than a played sound. Only your party
+	-- hears it: "PARTY" is your own group of five even in a raid, and solo it goes nowhere.
+	if IsInGroup() then C_ChatInfo.SendAddonMessage(PREFIX_BLINK, "lowhp", "PARTY") end
 end)
 
 -- "Out of range": swap the default error voice for alternating "too far away" clips.
