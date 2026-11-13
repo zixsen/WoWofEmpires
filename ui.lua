@@ -117,14 +117,20 @@ local function BuildSettingsPage(page)
 
 	CreateHeader(page, 16, -150, "Combat")
 	CreateCheckbox(page, -174, "Show when DoTs will kill (target frame and nameplates)", SavedOption("dotMarker"))
+	CreateCheckbox(page, -200, "Shift/Ctrl/Alt-click targets unit frames",
+		function() return ns.db.modifierTarget end,
+		function(on)
+			ns.db.modifierTarget = on
+			ns.UpdateModifierTarget()
+		end)
 
-	CreateHeader(page, 16, -214, "Volume")
+	CreateHeader(page, 16, -240, "Volume")
 	local note = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	note:SetPoint("TOPLEFT", 16, -236)
+	note:SetPoint("TOPLEFT", 16, -262)
 	note:SetText("Sounds play on the game's Dialog channel.")
 
 	local slider = CreateFrame("Frame", nil, page, "MinimalSliderWithSteppersTemplate")
-	slider:SetPoint("TOPLEFT", 12, -252)
+	slider:SetPoint("TOPLEFT", 12, -278)
 	slider:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(_, value)
 		C_CVar.SetCVar("Sound_DialogVolume", value)
 	end, slider)
@@ -135,14 +141,14 @@ local function BuildSettingsPage(page)
 		slider:Init(volume, 0, 1, 20, { [MinimalSliderWithSteppersMixin.Label.Right] = Percent })
 	end)
 
-	CreateHeader(page, 16, -296, "Messages")
+	CreateHeader(page, 16, -322, "Messages")
 	local chatNote = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	chatNote:SetPoint("TOPLEFT", 16, -318)
+	chatNote:SetPoint("TOPLEFT", 16, -344)
 	chatNote:SetText("Chat tab for level-ups and other addon messages.")
 
 	-- Lists the chat tabs that are open right now; rebuilt every time it's opened.
 	local chatTab = CreateFrame("DropdownButton", nil, page, "WowStyle1DropdownTemplate")
-	chatTab:SetPoint("TOPLEFT", 16, -336)
+	chatTab:SetPoint("TOPLEFT", 16, -362)
 	chatTab:SetWidth(200)
 	chatTab:SetupMenu(function(_, root)
 		for id = 1, Constants.ChatFrameConstants.MaxChatWindows do

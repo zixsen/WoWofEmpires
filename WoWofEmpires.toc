@@ -6,5 +6,6 @@
 
 core.lua
 dots.lua
+clicktarget.lua
 portraits.lua
 ui.lua
