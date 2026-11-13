@@ -58,6 +58,7 @@ ns.words = {
 	["bruh"] = "bruh.mp3",
 	["damn"] = "goddamnboah.mp3",
 	["durudu"] = "durudu.ogg",
+	["fahhh"] = "Fahhh.mp3",
 	["fake news"] = "fake-news-great.mp3",
 	["fast"] = "im-fast-as-fuck-boii-2.mp3",
 	["gay"] = "hah-gay.mp3",
