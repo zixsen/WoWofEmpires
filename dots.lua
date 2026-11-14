@@ -12,8 +12,8 @@
 -- ponytail: tooltips leave out spell power, so estimates run low (it shows a kill late, never early).
 -- Learning real tick sizes (as DoesItDie does) is the upgrade if that matters.
 --
--- Priests can also see Shadow Word: Death's kill range: its damage, from the start of the green, in
--- gold. All the green gold = one cast kills.
+-- Priests can also see when their target is in Shadow Word: Death range: the green turns gold once
+-- one cast kills.
 local addonName, ns = ...
 
 ns.defaults.dotMarker = false -- off until turned on in Settings; DoTs are shared with the group either way
@@ -455,15 +455,25 @@ local function CreateOverlay(parent)
 
 	local greenEnd = o.mirror:GetStatusBarTexture()
 
-	-- Shadow Word: Death (gold): its damage from the start of the bar, cut off where the green ends.
+	-- Shadow Word: Death: the green turns gold once health <= its damage. Hidden health can't be
+	-- compared, so an invisible status bar (gate) does it: min 0, max damage + 1, value health,
+	-- (damage + 1) bar widths wide and right-aligned with the bar. Above the damage its fill reaches
+	-- the bar's right edge; at or below, the fill stops at least one bar width short (never at zero
+	-- while the target lives). The gold runs from the end of that fill to the bar's right edge, cut
+	-- off where the green ends: nothing above the damage, all the green at or below it.
+	o.gate = CreateFrame("StatusBar", nil, o.clip)
+	o.gate:SetPoint("TOPRIGHT")
+	o.gate:SetPoint("BOTTOMRIGHT")
+	o.gate:SetStatusBarTexture(WHITE)
+	o.gate:SetStatusBarColor(0, 0, 0, 0)
 	o.swdClip = CreateFrame("Frame", nil, o.clip)
 	o.swdClip:SetClipsChildren(true)
 	o.swdClip:SetPoint("TOPLEFT")
 	o.swdClip:SetPoint("BOTTOMRIGHT", greenEnd, "BOTTOMRIGHT")
-	o.swd = CreateFrame("StatusBar", nil, o.swdClip)
-	o.swd:SetAllPoints(o.clip)
-	o.swd:SetStatusBarTexture(WHITE)
-	o.swd:SetStatusBarColor(1, 0.8, 0.1, 0.75)
+	local gold = o.swdClip:CreateTexture(nil, "ARTWORK")
+	gold:SetColorTexture(1, 0.8, 0.1, 0.85)
+	gold:SetPoint("TOPLEFT", o.gate:GetStatusBarTexture(), "TOPRIGHT")
+	gold:SetPoint("BOTTOMRIGHT", o.clip, "BOTTOMRIGHT")
 
 	o.marker = CreateFrame("StatusBar", nil, o.clip)
 	o.marker:SetPoint("TOPRIGHT", greenEnd, "TOPRIGHT")
@@ -489,14 +499,14 @@ end
 
 -- strata nil keeps the parent's.
 local function SetLayer(o, strata, level)
-	for i, frame in ipairs({ o.clip, o.mirror, o.swdClip, o.swd, o.marker }) do
+	for i, frame in ipairs({ o.clip, o.mirror, o.gate, o.swdClip, o.marker }) do
 		if strata then frame:SetFrameStrata(strata) end
 		frame:SetFrameLevel(level + i)
 	end
 end
 
--- Paints the DoT damage still to come (purple) and Shadow Word: Death's damage (gold) on the unit's
--- bar. min/max/value can be hidden values: status bars draw them without the addon ever reading them.
+-- Paints the DoT damage still to come (purple) and Shadow Word: Death range (gold) on the unit's bar.
+-- min/max/value can be hidden values: status bars draw them without the addon ever reading them.
 local function Paint(o, health, max, damage, swd)
 	o.marker:SetWidth(o.clip:GetWidth()) -- the whole bar's width is the mob's max health
 	o.mirror:SetMinMaxValues(0, max)
@@ -504,8 +514,9 @@ local function Paint(o, health, max, damage, swd)
 	o.marker:SetMinMaxValues(0, max)
 	o.marker:SetValue(damage)
 	o.marker:SetShown(damage > 0)
-	o.swd:SetMinMaxValues(0, max)
-	o.swd:SetValue(swd)
+	o.gate:SetWidth(o.clip:GetWidth() * (swd + 1))
+	o.gate:SetMinMaxValues(0, swd + 1)
+	o.gate:SetValue(health)
 	o.swdClip:SetShown(swd > 0)
 	o.clip:Show()
 end
@@ -531,7 +542,7 @@ local function Update(o, unit)
 	local dead = UnitIsDead(unit)
 	local alive = not (not issecretvalue(dead) and dead)
 	local damage = alive and ns.db.dotMarker and not (o == target and ns.db.dotPlatesOnly) and RemainingOn(unit) or 0
-	local swd = alive and ns.db.swdMarker and Hostile(unit) and SwdDamage() or 0
+	local swd = alive and o == target and ns.db.swdMarker and Hostile(unit) and SwdDamage() or 0
 	if (damage <= 0 and swd <= 0) or not o.bar:IsVisible() then return o.clip:Hide() end
 	local ok, err = pcall(function() Paint(o, UnitHealth(unit), UnitHealthMax(unit), damage, swd) end)
 	if not ok then
@@ -611,7 +622,7 @@ local function Refresh()
 		RaiseAboveTargetFrame()
 	end
 	if testUntil and GetTime() < testUntil then
-		if target.bar:IsVisible() then Paint(target, 0.8, 1, 0.3, 0.2) end -- gold to 20%, purple 50% to 80%
+		if target.bar:IsVisible() then Paint(target, 0.8, 1, 0.3, 0.9) end -- gold to 50%, purple 50% to 80%
 		return
 	end
 	Update(target, "target")

@@ -118,7 +118,7 @@ local function BuildSettingsPage(page)
 	CreateHeader(page, 16, -150, "Combat")
 	CreateCheckbox(page, -174, "Show when DoTs will kill (target frame and nameplates)", SavedOption("dotMarker"))
 	CreateCheckbox(page, -200, "Only show DoTs on nameplates, not the target frame", SavedOption("dotPlatesOnly"))
-	CreateCheckbox(page, -226, "Show Shadow Word: Death kill range (priests)", SavedOption("swdMarker"))
+	CreateCheckbox(page, -226, "Turn the target gold in Shadow Word: Death range", SavedOption("swdMarker"))
 	CreateCheckbox(page, -252, "Shift/Ctrl/Alt-click targets unit frames",
 		function() return ns.db.modifierTarget end,
 		function(on)
