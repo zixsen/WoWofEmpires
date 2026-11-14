@@ -117,20 +117,22 @@ local function BuildSettingsPage(page)
 
 	CreateHeader(page, 16, -150, "Combat")
 	CreateCheckbox(page, -174, "Show when DoTs will kill (target frame and nameplates)", SavedOption("dotMarker"))
-	CreateCheckbox(page, -200, "Shift/Ctrl/Alt-click targets unit frames",
+	CreateCheckbox(page, -200, "Only show DoTs on nameplates, not the target frame", SavedOption("dotPlatesOnly"))
+	CreateCheckbox(page, -226, "Show Shadow Word: Death kill range (priests)", SavedOption("swdMarker"))
+	CreateCheckbox(page, -252, "Shift/Ctrl/Alt-click targets unit frames",
 		function() return ns.db.modifierTarget end,
 		function(on)
 			ns.db.modifierTarget = on
 			ns.UpdateModifierTarget()
 		end)
 
-	CreateHeader(page, 16, -240, "Volume")
+	CreateHeader(page, 16, -292, "Volume")
 	local note = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	note:SetPoint("TOPLEFT", 16, -262)
+	note:SetPoint("TOPLEFT", 16, -314)
 	note:SetText("Sounds play on the game's Dialog channel.")
 
 	local slider = CreateFrame("Frame", nil, page, "MinimalSliderWithSteppersTemplate")
-	slider:SetPoint("TOPLEFT", 12, -278)
+	slider:SetPoint("TOPLEFT", 12, -330)
 	slider:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(_, value)
 		C_CVar.SetCVar("Sound_DialogVolume", value)
 	end, slider)
@@ -141,14 +143,14 @@ local function BuildSettingsPage(page)
 		slider:Init(volume, 0, 1, 20, { [MinimalSliderWithSteppersMixin.Label.Right] = Percent })
 	end)
 
-	CreateHeader(page, 16, -322, "Messages")
+	CreateHeader(page, 16, -374, "Messages")
 	local chatNote = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	chatNote:SetPoint("TOPLEFT", 16, -344)
+	chatNote:SetPoint("TOPLEFT", 16, -396)
 	chatNote:SetText("Chat tab for level-ups and other addon messages.")
 
 	-- Lists the chat tabs that are open right now; rebuilt every time it's opened.
 	local chatTab = CreateFrame("DropdownButton", nil, page, "WowStyle1DropdownTemplate")
-	chatTab:SetPoint("TOPLEFT", 16, -362)
+	chatTab:SetPoint("TOPLEFT", 16, -414)
 	chatTab:SetWidth(200)
 	chatTab:SetupMenu(function(_, root)
 		for id = 1, Constants.ChatFrameConstants.MaxChatWindows do
@@ -220,7 +222,7 @@ end
 local function CreateWindow()
 	window = CreateFrame("Frame", "WoWofEmpiresFrame", UIParent, "ButtonFrameTemplate")
 	window:Hide()
-	window:SetSize(360, 500)
+	window:SetSize(360, 556)
 	window:SetPoint("CENTER")
 	window:SetToplevel(true)
 	window:SetClampedToScreen(true)

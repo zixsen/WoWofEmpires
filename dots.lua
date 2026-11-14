@@ -11,9 +11,14 @@
 -- since it was cast.
 -- ponytail: tooltips leave out spell power, so estimates run low (it shows a kill late, never early).
 -- Learning real tick sizes (as DoesItDie does) is the upgrade if that matters.
+--
+-- Priests can also see Shadow Word: Death's kill range: its damage, from the start of the green, in
+-- gold. All the green gold = one cast kills.
 local addonName, ns = ...
 
 ns.defaults.dotMarker = false -- off until turned on in Settings; DoTs are shared with the group either way
+ns.defaults.dotPlatesOnly = false -- the purple on nameplates only, not on the target frame
+ns.defaults.swdMarker = false
 
 local TICK = 3 -- most DoTs tick every 3 sec; the rest are close enough
 local SCHOOL_MASK = { Holy = 2, Fire = 4, Nature = 8, Frost = 16, Shadow = 32, Arcane = 64 }
@@ -25,13 +30,16 @@ local AVOIDED = { MISS = true, RESIST = true, IMMUNE = true, DODGE = true, PARRY
 local dots = {}
 local plates = {} -- [nameplate unit] = its overlay, for the enemy nameplates on screen
 
+local function Hostile(unit)
+	local hostile = UnitCanAttack("player", unit)
+	return not issecretvalue(hostile) and hostile
+end
+
 -- The key DoTs are kept under for a hostile unit (default: your target). Without GUIDs only the
 -- target has one, so a nameplate only finds DoTs there if it's your target's.
 local function MobKey(unit)
 	unit = unit or "target"
-	if not UnitExists(unit) then return nil end
-	local hostile = UnitCanAttack("player", unit)
-	if issecretvalue(hostile) or not hostile then return nil end
+	if not UnitExists(unit) or not Hostile(unit) then return nil end
 	local guid = UnitGUID(unit)
 	if guid and not issecretvalue(guid) then return guid end
 	if unit == "target" then return "target" end
@@ -162,15 +170,19 @@ ns.On("PLAYER_TARGET_CHANGED", function() dots.target = nil end)
 --   3. debuffs: the mob where a debuff that isn't yours appears as the message arrives. Anyone's
 --      debuff counts, so it's the weakest; with two candidates their current target decides.
 -- A match is remembered for their later messages about that mob (recasts, misses). Only mobs with
--- a nameplate on your screen, or your target, can be matched.
+-- a nameplate on your screen, or your target, can be matched. A DoT on a mob you can't see yet (out
+-- of nameplate range) waits until it runs out: the caster re-sends their threat on their DoT'd mobs
+-- every few seconds, so it's matched by threat once the mob shows up on your screen.
 local MATCH_WINDOW = 1 -- seconds between their message and what you see happen
 local THREAT_TOLERANCE = 0.15 -- their threat moves a little between their measurement and yours
+local SYNC_EVERY = 3 -- seconds between threat updates for your DoT'd mobs
 local aliases = {} -- [their mob ID] = your key for that mob
 local auraIDs = {} -- [unit] = set of its debuff instance numbers last seen
 local onThreatList = {} -- [unit] = set of groupmates on its threat list
 local fresh = {} -- debuffs that just appeared and aren't yours: { mob, time, used }
 local joined = {} -- groupmates who just joined a mob's threat list: { mob, who, time, used }
-local pending = {} -- their DoTs waiting for a match: { theirs, who, owner, total, duration, threat, time }
+-- Their DoTs waiting for a match: { theirs, who, owner, total, duration, threat, threatTime, time }
+local pending = {}
 local matchLog = {} -- last few matching decisions, for /woe dots
 
 local function Log(text)
@@ -202,6 +214,29 @@ local function MobUnits()
 	local units = { "target" }
 	for unit in pairs(plates) do table.insert(units, unit) end
 	return units
+end
+
+-- "sync:<mob>=<threat>:<mob>=<threat>": your threat now on each mob (that you can see) with your
+-- DoTs on it, for groupmates still waiting to match one.
+-- ponytail: one message, so only as many mobs as fit in 255 characters (about five).
+local function SyncThreat()
+	if not IsInGroup() then return end
+	local now, message, done = GetTime(), "sync", {}
+	for _, unit in ipairs(MobUnits()) do
+		local mob = MobKey(unit)
+		if mob and mob ~= "target" and dots[mob] and not done[mob] then
+			done[mob] = true
+			for owner, dot in pairs(dots[mob]) do
+				local threat = owner:find("^me:") and dot.ends > now and ThreatOf("player", unit)
+				if threat then
+					local entry = (":%s=%d"):format(mob, threat)
+					if #message + #entry <= 255 then message = message .. entry end
+					break
+				end
+			end
+		end
+	end
+	if message ~= "sync" then ns.SendToGroup(message) end
 end
 
 -- 1: the mob where their threat is close to what they reported, and clearly closer than any other.
@@ -243,7 +278,9 @@ local function TryMatch()
 	local now = GetTime()
 	for i = #pending, 1, -1 do
 		local p = pending[i]
-		local mob, how = MatchByThreat(p), "threat"
+		local mob, how = aliases[p.theirs], "an earlier match"
+		-- 1, only right after they measured it: their threat keeps changing
+		if not mob and now - p.threatTime <= MATCH_WINDOW then mob, how = MatchByThreat(p), "threat" end
 		if not mob then -- 2
 			local mobs, count = Candidates(joined, p, p.who)
 			if count == 1 then
@@ -270,8 +307,8 @@ local function TryMatch()
 			AddDot(mob, p.owner, p.total, p.duration, p.time)
 			Log(("matched %s's %s by %s"):format(p.who, p.owner:match("%d+$"), how))
 			table.remove(pending, i)
-		elseif now - p.time > MATCH_WINDOW then
-			Log(("no match for %s's %s"):format(p.who, p.owner:match("%d+$")))
+		elseif now - p.time > p.duration then
+			Log(("no match for %s's %s before it ran out"):format(p.who, p.owner:match("%d+$")))
 			table.remove(pending, i)
 		end
 	end
@@ -360,10 +397,22 @@ ns.On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
 		if mob then
 			AddDot(mob, owner, tonumber(total), tonumber(duration))
 		else
+			for i = #pending, 1, -1 do -- a recast replaces the one still waiting
+				if pending[i].theirs == theirs and pending[i].owner == owner then table.remove(pending, i) end
+			end
 			table.insert(pending, { theirs = theirs, who = who, owner = owner, total = tonumber(total),
-				duration = tonumber(duration), threat = tonumber(threat), time = GetTime() })
+				duration = tonumber(duration), threat = tonumber(threat), threatTime = GetTime(), time = GetTime() })
 			TryMatch()
 		end
+		return
+	end
+	if text:find("^sync:") then
+		for mob, threat in text:gmatch(":([^:=]+)=(%d+)") do
+			for _, p in ipairs(pending) do
+				if p.theirs == mob and p.who == who then p.threat, p.threatTime = tonumber(threat), GetTime() end
+			end
+		end
+		if #pending > 0 then TryMatch() end
 		return
 	end
 	theirs, spellID = text:match("^undot:([^:]+):(%d+)$")
@@ -405,6 +454,17 @@ local function CreateOverlay(parent)
 	o.mirror:SetStatusBarColor(0, 0, 0, 0)
 
 	local greenEnd = o.mirror:GetStatusBarTexture()
+
+	-- Shadow Word: Death (gold): its damage from the start of the bar, cut off where the green ends.
+	o.swdClip = CreateFrame("Frame", nil, o.clip)
+	o.swdClip:SetClipsChildren(true)
+	o.swdClip:SetPoint("TOPLEFT")
+	o.swdClip:SetPoint("BOTTOMRIGHT", greenEnd, "BOTTOMRIGHT")
+	o.swd = CreateFrame("StatusBar", nil, o.swdClip)
+	o.swd:SetAllPoints(o.clip)
+	o.swd:SetStatusBarTexture(WHITE)
+	o.swd:SetStatusBarColor(1, 0.8, 0.1, 0.75)
+
 	o.marker = CreateFrame("StatusBar", nil, o.clip)
 	o.marker:SetPoint("TOPRIGHT", greenEnd, "TOPRIGHT")
 	o.marker:SetPoint("BOTTOMRIGHT", greenEnd, "BOTTOMRIGHT")
@@ -429,28 +489,51 @@ end
 
 -- strata nil keeps the parent's.
 local function SetLayer(o, strata, level)
-	for i, frame in ipairs({ o.clip, o.mirror, o.marker }) do
+	for i, frame in ipairs({ o.clip, o.mirror, o.swdClip, o.swd, o.marker }) do
 		if strata then frame:SetFrameStrata(strata) end
 		frame:SetFrameLevel(level + i)
 	end
 end
 
--- Paints the damage still to come on the unit's bar, or hides the overlay. min/max/value can be
--- hidden values: status bars draw them without the addon ever reading them.
-local function Paint(o, health, max, damage)
+-- Paints the DoT damage still to come (purple) and Shadow Word: Death's damage (gold) on the unit's
+-- bar. min/max/value can be hidden values: status bars draw them without the addon ever reading them.
+local function Paint(o, health, max, damage, swd)
 	o.marker:SetWidth(o.clip:GetWidth()) -- the whole bar's width is the mob's max health
 	o.mirror:SetMinMaxValues(0, max)
 	o.mirror:SetValue(health)
 	o.marker:SetMinMaxValues(0, max)
 	o.marker:SetValue(damage)
+	o.marker:SetShown(damage > 0)
+	o.swd:SetMinMaxValues(0, max)
+	o.swd:SetValue(swd)
+	o.swdClip:SetShown(swd > 0)
 	o.clip:Show()
 end
 
+-- Shadow Word: Death's damage from its tooltip (the low end of "450 to 522 Shadow damage"), 0 if you
+-- don't know it. Read once a second: it changes as you level, and the text can load late.
+local swdDamage, swdReadAt = 0, -1
+local function SwdDamage()
+	if GetTime() - swdReadAt < 1 then return swdDamage end
+	swdReadAt, swdDamage = GetTime(), 0
+	local info = C_Spell.GetSpellInfo("Shadow Word: Death")
+	if not info or (IsPlayerSpell and not IsPlayerSpell(info.spellID)) then return 0 end
+	local text = C_Spell.GetSpellDescription(info.spellID)
+	if not text or issecretvalue(text) then return 0 end
+	local amount = text:match("(%d[%d,]*) to %d[%d,]* %a* ?damage") or text:match("(%d[%d,]*) %a* ?damage")
+	swdDamage = amount and tonumber((amount:gsub(",", ""))) or 0
+	return swdDamage
+end
+
+local target -- the target frame's overlay
+
 local function Update(o, unit)
 	local dead = UnitIsDead(unit)
-	local damage = ns.db.dotMarker and not (not issecretvalue(dead) and dead) and RemainingOn(unit) or 0
-	if damage <= 0 or not o.bar:IsVisible() then return o.clip:Hide() end
-	local ok, err = pcall(function() Paint(o, UnitHealth(unit), UnitHealthMax(unit), damage) end)
+	local alive = not (not issecretvalue(dead) and dead)
+	local damage = alive and ns.db.dotMarker and not (o == target and ns.db.dotPlatesOnly) and RemainingOn(unit) or 0
+	local swd = alive and ns.db.swdMarker and Hostile(unit) and SwdDamage() or 0
+	if (damage <= 0 and swd <= 0) or not o.bar:IsVisible() then return o.clip:Hide() end
+	local ok, err = pcall(function() Paint(o, UnitHealth(unit), UnitHealthMax(unit), damage, swd) end)
 	if not ok then
 		Report(err)
 		o.clip:Hide()
@@ -462,7 +545,6 @@ end
 -- overlay sits on UIParent one whole strata above the target frame's highest part (LOW -> MEDIUM),
 -- at the bottom of that strata so open windows still cover it. Hidden strata values are skipped.
 local STRATA_ORDER = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
-local target
 
 local function RaiseAboveTargetFrame()
 	local top = STRATA_RANK.LOW
@@ -529,7 +611,7 @@ local function Refresh()
 		RaiseAboveTargetFrame()
 	end
 	if testUntil and GetTime() < testUntil then
-		if target.bar:IsVisible() then Paint(target, 0.8, 1, 0.3) end -- purple from 50% to 80%
+		if target.bar:IsVisible() then Paint(target, 0.8, 1, 0.3, 0.2) end -- gold to 20%, purple 50% to 80%
 		return
 	end
 	Update(target, "target")
@@ -547,6 +629,7 @@ function ns.DotsDebug()
 	end
 	local now = GetTime()
 	ns.Print(("Target %s, remaining DoT damage %d"):format(Short(MobKey()), RemainingOn("target")))
+	ns.Print(("Shadow Word: Death damage %d (0: not known)"):format(SwdDamage()))
 	ns.Print("Tracked DoTs (yours and your group's):")
 	for mob, list in pairs(dots) do
 		for owner, dot in pairs(list) do
@@ -581,4 +664,5 @@ ns.On("PLAYER_LOGIN", function()
 	local ok, err = pcall(CreateTargetOverlay)
 	if not ok then Report(err) end
 	C_Timer.NewTicker(0.1, Refresh)
+	C_Timer.NewTicker(SYNC_EVERY, SyncThreat)
 end)
