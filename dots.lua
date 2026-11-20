@@ -2,15 +2,16 @@
 -- (yours, plus those of groupmates running this addon) will finish it off.
 --
 -- Forever hides target health and auras from addons, so this never decides "will it die" itself.
--- Instead the end of the green health is painted purple for the damage the DoTs still have to deal:
--- a status bar as wide as the health bar, its right edge pinned to the end of the green, filling
--- leftwards with max = the target's (hidden) max health and value = remaining DoT damage. Status bars
--- can draw hidden values (idea from DoesItDie by swirllyman, MIT). No green left = the target dies.
+-- Instead the end of the green health is painted purple for the damage the DoTs still have to deal,
+-- through status bars fed the target's (hidden) health and max health: they can draw hidden values
+-- (idea from DoesItDie by swirllyman, MIT). No red left = the target dies.
 --
--- Remaining damage is estimated from each DoT's tooltip ("40 Fire damage over 15 sec") and the time
--- since it was cast.
--- ponytail: tooltips leave out spell power, so estimates run low (it shows a kill late, never early).
--- Learning real tick sizes (as DoesItDie does) is the upgrade if that matters.
+-- The red's end (the health once the DoTs are done) must not move when a DoT ticks: the tick takes
+-- the same off the health and off the damage still to come. Forever hides tick amounts, but they can
+-- still be drawn: each tick's real (hidden) amount, as Forever reports it (UNIT_COMBAT), is chained
+-- into the purple as one more bar, so the edge is health + the ticks so far - the DoTs' whole damage,
+-- and a tick adds to the chain exactly what it takes off the health, in the same frame. Only other
+-- damage moves the edge. Which hit was your tick: see "Ticks" below.
 --
 -- Priests can also see when their target is in Shadow Word: Death range: the green turns gold once
 -- one cast kills.
@@ -19,6 +20,7 @@ local addonName, ns = ...
 ns.defaults.dotMarker = false -- off until turned on in Settings; DoTs are shared with the group either way
 ns.defaults.dotPlatesOnly = false -- the purple on nameplates only, not on the target frame
 ns.defaults.swdMarker = false
+ns.defaults.dotLines = {} -- [spellID] = whether its ticks show up in your combat log (learned, see the hit matching)
 
 local TICK = 3 -- most DoTs tick every 3 sec; the rest are close enough
 local SCHOOL_MASK = { Holy = 2, Fire = 4, Nature = 8, Frost = 16, Shadow = 32, Arcane = 64 }
@@ -47,29 +49,74 @@ local function MobKey(unit)
 	if not issecretvalue(isTarget) and isTarget then return "target" end
 end
 
+-- Ticks: one every TICK sec after the cast, each reported by UNIT_COMBAT on your target and the
+-- nameplates on screen, the moment it lands, with its school (not its amount, which is hidden). A
+-- hit counts as a DoT's tick when it's in the DoT's school, within a window of its next tick (the
+-- rhythm follows the ticks seen), and, for a DoT whose ticks show up in your combat log, arrives in
+-- the same frame as a combat log line (see the hit matching further down). A tick nobody saw (the
+-- mob out of sight) counts as landed TICK_SEEN after it was due, with an estimated amount.
+-- dot.landed = ticks landed; dot.amounts = their amounts (hidden, or estimated for unseen ones);
+-- dot.firstTick = the first ordinary tick's amount, the size of the ticks still to come;
+-- dot.seenAt, dot.seenTick = when the last tick seen landed, and which.
+local TICK_SEEN = 0.3 -- before any tick was seen: the first tick lands ~0.1 sec off the cast's rhythm
+local TICK_SEEN_SYNCED = 0.15 -- once one was seen, the rest land on its rhythm
+
+local function TickCount(dot)
+	return math.max(1, math.floor(dot.duration / TICK + 0.5))
+end
+
+-- The size of one tick: the first real one once seen (hidden), else the tooltip's share.
+local function TickSize(dot)
+	return dot.firstTick or dot.total / TickCount(dot)
+end
+
+-- When the DoT's next tick is due, and how far off a hit may be to count as it.
+local function NextTick(dot)
+	if dot.seenAt then return dot.seenAt + (dot.landed - dot.seenTick + 1) * TICK, TICK_SEEN_SYNCED end
+	return dot.ends - dot.duration + (dot.landed + 1) * TICK, TICK_SEEN
+end
+
+-- Damage still to come, as a plain estimate (the purple itself uses the real amounts): the ticks
+-- that haven't landed times the tooltip's share.
+local function Remaining(dot, now)
+	local ticks = TickCount(dot)
+	while dot.landed < ticks do -- ticks nobody saw land count once they're overdue
+		local due, window = NextTick(dot)
+		if now <= due + window then break end
+		dot.landed = dot.landed + 1
+		table.insert(dot.amounts, TickSize(dot))
+	end
+	return dot.total * (ticks - dot.landed) / ticks
+end
+
+-- Whether a DoT still counts toward the purple: while it runs, or another DoT of its school on the
+-- mob does. Two DoTs of one school ticking together can't always be told apart, so a tick may be
+-- booked to the other one; their real amounts only add up right as a group, so a finished one stays
+-- in until its whole group is done.
+local function Counts(list, dot, now)
+	for _, other in pairs(list) do
+		if other.school == dot.school and Remaining(other, now) > 0 then return true end
+	end
+	return false
+end
+
 -- started: when the DoT was cast (default now), for groupmates' DoTs matched a moment late.
+-- owner ends in the spell ID ("me:589", "Name:589"); the hit matching looks its school up from it.
 local function AddDot(mob, owner, total, duration, started)
 	local now = GetTime()
-	for key, list in pairs(dots) do -- drop expired DoTs on every mob while we're here
+	for key, list in pairs(dots) do -- drop finished DoTs on every mob while we're here
 		for who, dot in pairs(list) do
-			if dot.ends <= now then list[who] = nil end
+			if not Counts(list, dot, now) then list[who] = nil end
 		end
 		if next(list) == nil then dots[key] = nil end
 	end
 	dots[mob] = dots[mob] or {}
-	dots[mob][owner] = { total = total, duration = duration, ends = (started or now) + duration }
+	dots[mob][owner] = { total = total, duration = duration, ends = (started or now) + duration,
+		spellID = tonumber(owner:match("%d+$")), landed = 0, amounts = {} }
 end
 
 local function RemoveDot(mob, owner)
 	if dots[mob] then dots[mob][owner] = nil end
-end
-
--- Damage still to come: whole ticks left times the damage per tick.
-local function Remaining(dot, now)
-	local left = dot.ends - now
-	if left <= 0 then return 0 end
-	local ticks = math.max(1, math.floor(dot.duration / TICK + 0.5))
-	return dot.total * math.min(ticks, math.ceil(left / TICK)) / ticks
 end
 
 local function RemainingOn(unit)
@@ -80,6 +127,25 @@ local function RemainingOn(unit)
 		damage = damage + Remaining(dot, now)
 	end
 	return damage
+end
+
+-- /woe dots trace (again to stop): prints each DoT you cast and every change to your target's health
+-- with the DoT damage counted as still to come right then, timed from when the trace started.
+local traceFrom
+function ns.DotsTrace()
+	traceFrom = not traceFrom and GetTime() or nil
+	ns.Print(traceFrom and "DoT trace on. /woe dots trace again to stop." or "DoT trace off.")
+end
+
+local function Trace(text)
+	if traceFrom then ns.Print(("%.3f %s"):format(GetTime() - traceFrom, text)) end -- same time = same frame
+end
+
+-- Your target, or the nameplate showing it (the trace follows both).
+local function IsTarget(unit)
+	if unit == "target" then return true end
+	local same = UnitIsUnit(unit, "target")
+	return not issecretvalue(same) and same
 end
 
 -- "40 Fire damage over 15 sec" -> 40, Fire's school mask, 15. Not DoTs on your target, though the
@@ -123,6 +189,7 @@ ns.On("UNIT_SPELLCAST_SUCCEEDED", function(_, _, castGUID, spellID)
 	local total, school, duration = ParseDot(spellID)
 	if not total then return end
 	AddDot(mob, "me:" .. spellID, total, duration)
+	Trace(("cast %s: %d over %d sec"):format(C_Spell.GetSpellName(spellID) or spellID, total, duration))
 	lastCast = { mob = mob, spellID = spellID, school = school, time = GetTime() }
 	if mob ~= "target" then
 		-- Your threat on the mob lets groupmates find it on their screens (-1: not on its list yet).
@@ -363,9 +430,16 @@ end
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("UNIT_AURA")
 watcher:RegisterEvent("UNIT_THREAT_LIST_UPDATE")
+watcher:RegisterEvent("UNIT_HEALTH")
 watcher:SetScript("OnEvent", function(_, event, unit)
 	if unit ~= "target" and not plates[unit] then return end
-	if event == "UNIT_AURA" then ScanAuras(unit) else ScanThreat(unit) end
+	if event == "UNIT_HEALTH" then
+		if IsTarget(unit) then Trace(("health changed on %s, DoTs still to deal %d"):format(unit, RemainingOn(unit))) end
+	elseif event == "UNIT_AURA" then
+		ScanAuras(unit)
+	else
+		ScanThreat(unit)
+	end
 end)
 ns.On("PLAYER_TARGET_CHANGED", function()
 	ScanAuras("target", true)
@@ -429,19 +503,35 @@ end)
 -- Display: the target frame and enemy nameplates
 ------------------------------------------------------------------------
 local WHITE = "Interface\\Buttons\\WHITE8X8"
+local FINE = 100 -- the purple's helper bars are drawn this many times smaller (see CreateOverlay)
 local STRATA_RANK = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
 
 -- Errors here would otherwise be invisible (Lua errors are off by default), so say it once in chat.
-local reported
+local lastError -- also shown by /woe dots
 local function Report(err)
-	if reported then return end
-	reported = true
-	ns.Print("DoT overlay error, please report: " .. tostring(err))
+	if not lastError then ns.Print("DoT overlay error, please report: " .. tostring(err)) end
+	lastError = tostring(err)
+end
+
+-- Forever can hide whether a frame is shown (some target frame parts in dungeons); count that as shown.
+local function Visible(region)
+	local visible = region:IsVisible()
+	return issecretvalue(visible) or visible
 end
 
 -- One overlay over a health bar: a clip frame (keeps the purple inside the bar when the DoTs
 -- out-damage what's left) holding an invisible copy of the bar (mirror, whose fill ends where the
 -- green ends; Forever won't let addon frames hang off Blizzard's own fill) and the purple (marker).
+-- An invisible helper status bar: drawn at 1/FINE scale and not rounded to pixels.
+local function Helper(bar)
+	bar:SetScale(1 / FINE)
+	bar:SetStatusBarTexture(WHITE)
+	bar:SetStatusBarColor(0, 0, 0, 0)
+	bar:GetStatusBarTexture():SetTexelSnappingBias(0)
+	bar:GetStatusBarTexture():SetSnapToPixelGrid(false)
+	return bar
+end
+
 local function CreateOverlay(parent)
 	local o = {}
 	o.clip = CreateFrame("Frame", nil, parent)
@@ -453,7 +543,11 @@ local function CreateOverlay(parent)
 	o.mirror:SetStatusBarTexture(WHITE)
 	o.mirror:SetStatusBarColor(0, 0, 0, 0)
 
-	local greenEnd = o.mirror:GetStatusBarTexture()
+	-- Everything below is drawn only over the green: cut off where the mirror's fill ends.
+	o.green = CreateFrame("Frame", nil, o.clip)
+	o.green:SetClipsChildren(true)
+	o.green:SetPoint("TOPLEFT")
+	o.green:SetPoint("BOTTOMRIGHT", o.mirror:GetStatusBarTexture(), "BOTTOMRIGHT")
 
 	-- Shadow Word: Death: the green turns gold once health <= its damage. Hidden health can't be
 	-- compared, so an invisible status bar (gate) does it: min 0, max damage + 1, value health,
@@ -466,28 +560,30 @@ local function CreateOverlay(parent)
 	o.gate:SetPoint("BOTTOMRIGHT")
 	o.gate:SetStatusBarTexture(WHITE)
 	o.gate:SetStatusBarColor(0, 0, 0, 0)
-	o.swdClip = CreateFrame("Frame", nil, o.clip)
-	o.swdClip:SetClipsChildren(true)
-	o.swdClip:SetPoint("TOPLEFT")
-	o.swdClip:SetPoint("BOTTOMRIGHT", greenEnd, "BOTTOMRIGHT")
-	local gold = o.swdClip:CreateTexture(nil, "ARTWORK")
-	gold:SetColorTexture(1, 0.8, 0.1, 0.85)
-	gold:SetPoint("TOPLEFT", o.gate:GetStatusBarTexture(), "TOPRIGHT")
-	gold:SetPoint("BOTTOMRIGHT", o.clip, "BOTTOMRIGHT")
+	o.gold = o.green:CreateTexture(nil, "ARTWORK")
+	o.gold:SetColorTexture(1, 0.8, 0.1, 0.85)
+	o.gold:SetPoint("TOPLEFT", o.gate:GetStatusBarTexture(), "TOPRIGHT")
+	o.gold:SetPoint("BOTTOMRIGHT", o.clip, "BOTTOMRIGHT")
 
-	o.marker = CreateFrame("StatusBar", nil, o.clip)
-	o.marker:SetPoint("TOPRIGHT", greenEnd, "TOPRIGHT")
-	o.marker:SetPoint("BOTTOMRIGHT", greenEnd, "BOTTOMRIGHT")
-	o.marker:SetReverseFill(true)
-	o.marker:SetStatusBarTexture(WHITE)
-	o.marker:SetStatusBarColor(0.62, 0.2, 1, 0.8)
+	-- The purple: from the red's end (the health once the DoTs are done) to the green's end, cut off
+	-- where the green ends. The red's end is found by a chain of invisible helper bars (see Paint),
+	-- starting from fine, a copy of the health bar. They're drawn at 1/FINE scale and not rounded to
+	-- pixels, so only the purple's own edge gets rounded, once.
+	o.fine = Helper(CreateFrame("StatusBar", nil, o.clip))
+	o.fine:SetAllPoints()
+	o.chain = {} -- the helper bars, made as needed
 
-	-- A thin line where the health will end once the DoTs are done.
+	o.marker = CreateFrame("Frame", nil, o.green)
+	o.marker:SetAllPoints(o.clip)
+	o.purple = o.marker:CreateTexture(nil, "ARTWORK")
+	o.purple:SetColorTexture(0.62, 0.2, 1, 0.8)
+
+	-- A thin line at the red's end.
 	local edge = o.marker:CreateTexture(nil, "OVERLAY")
 	edge:SetColorTexture(1, 1, 1, 0.9)
 	edge:SetWidth(1)
-	edge:SetPoint("TOPLEFT", o.marker:GetStatusBarTexture(), "TOPLEFT")
-	edge:SetPoint("BOTTOMLEFT", o.marker:GetStatusBarTexture(), "BOTTOMLEFT")
+	edge:SetPoint("TOPLEFT", o.purple, "TOPLEFT")
+	edge:SetPoint("BOTTOMLEFT", o.purple, "BOTTOMLEFT")
 	return o
 end
 
@@ -499,7 +595,7 @@ end
 
 -- strata nil keeps the parent's.
 local function SetLayer(o, strata, level)
-	for i, frame in ipairs({ o.clip, o.mirror, o.gate, o.swdClip, o.marker }) do
+	for i, frame in ipairs({ o.clip, o.mirror, o.gate, o.green, o.fine, o.marker }) do
 		if strata then frame:SetFrameStrata(strata) end
 		frame:SetFrameLevel(level + i)
 	end
@@ -507,17 +603,53 @@ end
 
 -- Paints the DoT damage still to come (purple) and Shadow Word: Death range (gold) on the unit's bar.
 -- min/max/value can be hidden values: status bars draw them without the addon ever reading them.
-local function Paint(o, health, max, damage, swd)
-	o.marker:SetWidth(o.clip:GetWidth()) -- the whole bar's width is the mob's max health
+-- parts: per DoT { ticks = how many it deals, tick = the size of one, amounts = the ticks landed }.
+-- The red's end is worked out from the green's end without any sums in Lua: for each DoT, back by
+-- its whole damage (a reverse-filled bar ticks bar-widths wide, filled to one tick), then forward by
+-- each tick that landed (a bar per tick, filled to its real amount). A tick lowers the health and
+-- lengthens the chain by the same amount, so the red's end stays exactly where it was.
+local function Paint(o, health, max, parts, swd)
+	-- The whole bar's width is the mob's max health. Kept from when it was last readable, in case
+	-- Forever hides it.
+	local width = o.clip:GetWidth()
+	if issecretvalue(width) then width = o.width else o.width = width end
 	o.mirror:SetMinMaxValues(0, max)
 	o.mirror:SetValue(health)
-	o.marker:SetMinMaxValues(0, max)
-	o.marker:SetValue(damage)
-	o.marker:SetShown(damage > 0)
-	o.gate:SetWidth(o.clip:GetWidth() * (swd + 1))
+	o.fine:SetMinMaxValues(0, max)
+	o.fine:SetValue(health)
+
+	local point, side, used = o.fine:GetStatusBarTexture(), "RIGHT", 0
+	local function Step(back, ticks, value)
+		used = used + 1
+		local bar = o.chain[used]
+		if not bar then
+			bar = Helper(CreateFrame("StatusBar", nil, o.clip))
+			o.chain[used] = bar
+		end
+		local from = back and "RIGHT" or "LEFT"
+		bar:ClearAllPoints()
+		bar:SetReverseFill(back)
+		bar:SetPoint("TOP" .. from, point, "TOP" .. side)
+		bar:SetPoint("BOTTOM" .. from, point, "BOTTOM" .. side)
+		bar:SetWidth(width * FINE * ticks)
+		bar:SetMinMaxValues(0, max)
+		bar:SetValue(value)
+		bar:Show()
+		point, side = bar:GetStatusBarTexture(), back and "LEFT" or "RIGHT"
+	end
+	for _, part in ipairs(parts) do
+		Step(true, part.ticks, part.tick)
+		for _, amount in ipairs(part.amounts) do Step(false, 1, amount) end
+	end
+	for i = used + 1, #o.chain do o.chain[i]:Hide() end
+	o.purple:ClearAllPoints()
+	o.purple:SetPoint("TOPLEFT", point, "TOP" .. side)
+	o.purple:SetPoint("BOTTOMRIGHT", o.mirror:GetStatusBarTexture(), "BOTTOMRIGHT")
+	o.marker:SetShown(#parts > 0)
+	o.gate:SetWidth(width * (swd + 1))
 	o.gate:SetMinMaxValues(0, swd + 1)
 	o.gate:SetValue(health)
-	o.swdClip:SetShown(swd > 0)
+	o.gold:SetShown(swd > 0)
 	o.clip:Show()
 end
 
@@ -543,8 +675,22 @@ local function Update(o, unit)
 	local alive = not (not issecretvalue(dead) and dead)
 	local damage = alive and ns.db.dotMarker and not (o == target and ns.db.dotPlatesOnly) and RemainingOn(unit) or 0
 	local swd = alive and o == target and ns.db.swdMarker and Hostile(unit) and SwdDamage() or 0
-	if (damage <= 0 and swd <= 0) or not o.bar:IsVisible() then return o.clip:Hide() end
-	local ok, err = pcall(function() Paint(o, UnitHealth(unit), UnitHealthMax(unit), damage, swd) end)
+	if (damage <= 0 and swd <= 0) or not Visible(o.bar) then return o.clip:Hide() end
+	if traceFrom and damage ~= o.traced and IsTarget(unit) then
+		o.traced = damage
+		Trace(("purple on %s now about %d"):format(unit, damage))
+	end
+	local parts, now = {}, GetTime()
+	if damage > 0 then
+		local list = dots[MobKey(unit)] or {}
+		for owner, dot in pairs(list) do
+			if Counts(list, dot, now) then
+				table.insert(parts, { owner = owner, ticks = TickCount(dot), tick = TickSize(dot), amounts = dot.amounts })
+			end
+		end
+		table.sort(parts, function(a, b) return a.owner < b.owner end)
+	end
+	local ok, err = pcall(function() Paint(o, UnitHealth(unit), UnitHealthMax(unit), parts, swd) end)
 	if not ok then
 		Report(err)
 		o.clip:Hide()
@@ -560,8 +706,8 @@ local STRATA_ORDER = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCR
 local function RaiseAboveTargetFrame()
 	local top = STRATA_RANK.LOW
 	local function Visit(frame, depth)
-		local strata = frame:GetFrameStrata()
-		if frame:IsShown() and not issecretvalue(strata) and STRATA_RANK[strata] then
+		local shown, strata = frame:IsShown(), frame:GetFrameStrata()
+		if (issecretvalue(shown) or shown) and not issecretvalue(strata) and STRATA_RANK[strata] then
 			top = math.max(top, STRATA_RANK[strata])
 		end
 		if depth < 6 then
@@ -622,11 +768,173 @@ local function Refresh()
 		RaiseAboveTargetFrame()
 	end
 	if testUntil and GetTime() < testUntil then
-		if target.bar:IsVisible() then Paint(target, 0.8, 1, 0.3, 0.9) end -- gold to 50%, purple 50% to 80%
+		if Visible(target.bar) then -- gold to 50%, purple 50% to 80%
+			Paint(target, 0.8, 1, { { ticks = 1, tick = 0.3, amounts = {} } }, 0.9)
+		end
 		return
 	end
 	Update(target, "target")
 end
+
+local function RefreshNow()
+	local ok, err = pcall(Refresh)
+	if not ok then Report(err) end
+end
+
+-- Which hit was your tick. Everything a frame brings is collected (events all run before the frame's
+-- OnUpdate) and sorted out in OnUpdate, then the overlays are repainted before the frame is drawn:
+--   hits     UNIT_COMBAT on your target and the nameplates on screen: school and moment, hidden amount
+--   lines    combat log lines (COMBAT_LOG_MESSAGE, live ones): their text is locked, but each is one
+--            event your combat log filter shows, in the same frame as the hit it's about
+-- A hit is a DoT's tick when it's in the DoT's school, close to its next tick, and, for a spell whose
+-- ticks show up in your combat log (learned per spell, see below), comes with a line. So for those,
+-- other damage of the same school (a groupmate's spell, a shadow wand: neither puts a line in your
+-- log) can't pass for the tick. Spells your filter doesn't log fall back on school and timing, which
+-- is why the filter should show all your periodic damage (drain and leech too, for Devouring Plague).
+-- The same hit is reported once per unit showing the mob (target, nameplate) and counts once; two
+-- DoTs of one school ticking in the same instant are two hits through the same unit.
+local LIVE_LINE = Enum.CombatLogMessageOrder and Enum.CombatLogMessageOrder.Newest or 0
+local CLEAN = 0.5 -- a tick is clean when no other DoT of its school on the mob is due within this
+local cleanEvidence, cleanStreak = {}, {} -- [spellID]: clean ticks in a row with a line (true) or without
+local pendingHits, pendingLines, pendingPaint = {}, 0, false
+
+local function NoFlag(flag)
+	return flag == nil or issecretvalue(flag) or flag == ""
+end
+
+local function MatchHits()
+	local now, lines = GetTime(), pendingLines
+	local hits, firstUnit, fed = {}, {}, {}
+	for _, h in ipairs(pendingHits) do
+		local mob = MobKey(h.unit)
+		if mob and dots[mob] then
+			local key = mob .. ":" .. h.school .. ":" .. (NoFlag(h.flag) and "" or h.flag)
+			firstUnit[key] = firstUnit[key] or h.unit
+			if firstUnit[key] == h.unit then
+				h.mob = mob
+				table.insert(hits, h)
+				for _, dot in pairs(dots[mob]) do -- its school, from its tooltip, once
+					if dot.school == nil then dot.school = select(2, ParseDot(dot.spellID)) or false end
+				end
+			end
+		end
+	end
+
+	-- The DoT this hit can be the tick of: right school, near its next tick, not fed yet this frame,
+	-- and allowed(dot).
+	local function Candidate(h, allowed)
+		local best, bestOwner, bestOff
+		for owner, dot in pairs(dots[h.mob]) do
+			if not fed[dot] and dot.school == h.school and allowed(dot) and Remaining(dot, now) > 0 then
+				local due, window = NextTick(dot)
+				local off = math.abs(now - due)
+				if off <= window and (not bestOff or off < bestOff) then best, bestOwner, bestOff = dot, owner, off end
+			end
+		end
+		return best, bestOwner
+	end
+
+	local function Land(h, dot, owner, how)
+		fed[dot], h.used = true, true
+		dot.landed = dot.landed + 1
+		dot.seenAt, dot.seenTick = now, dot.landed
+		table.insert(dot.amounts, h.amount)
+		if not dot.firstTick and NoFlag(h.flag) then dot.firstTick = h.amount end -- not a crit or a resist
+		if IsTarget(h.unit) then
+			Trace(("tick: %s %d/%d by %s%s"):format(owner, dot.landed, TickCount(dot), how,
+				NoFlag(h.flag) and "" or ", " .. h.flag))
+		end
+	end
+
+	-- Whether a spell's ticks come with a log line depends on your combat log filter, and is learned
+	-- from clean ticks: the frame's only hit, with no other DoT of its school on the mob due around
+	-- then (two DoTs of one school ticking together can't be told apart). One clean tick with a line
+	-- settles "yes" (a stray line on exactly that frame is rare, and the next clean tick corrects it);
+	-- "no" takes two in a row. Kept between sessions (ns.db.dotLines[spellID]).
+	if #hits == 1 then
+		local h = hits[1]
+		local only, count = nil, 0
+		for _, dot in pairs(dots[h.mob]) do
+			if dot.school == h.school and Remaining(dot, now) > 0 and math.abs(now - NextTick(dot)) <= CLEAN then
+				only, count = dot, count + 1
+			end
+		end
+		if count == 1 and only.spellID then
+			local due, window = NextTick(only)
+			if math.abs(now - due) <= window then
+				local kind = lines > 0
+				local was, streak = cleanEvidence[only.spellID], cleanStreak[only.spellID] or 0
+				streak = was == kind and streak + 1 or 1
+				cleanEvidence[only.spellID], cleanStreak[only.spellID] = kind, streak
+				if streak >= (kind and 1 or 2) and ns.db.dotLines[only.spellID] ~= kind then
+					ns.db.dotLines[only.spellID] = kind
+					Trace(("learned: spell %d's ticks %s in your combat log"):format(only.spellID, kind and "show up" or "don't show up"))
+				end
+			end
+		end
+	end
+
+	-- Hits with a line go to spells that need one, then to ones not known yet, then the rest; hits
+	-- without one never to spells that need one. So a hit of the same school that isn't your tick (a
+	-- groupmate's spell, a shadow wand) can't pass for one of a spell that shows up in your log.
+	local function Logged(value) return function(dot) return ns.db.dotLines[dot.spellID] == value end end
+	for _, h in ipairs(hits) do
+		if lines > 0 then
+			local dot, owner = Candidate(h, Logged(true))
+			local how = "school, timing and a log line"
+			if not dot then dot, owner = Candidate(h, Logged(nil)) how = "school and timing (log not known yet)" end
+			if not dot then dot, owner = Candidate(h, Logged(false)) how = "school and timing" end
+			if dot then
+				lines = lines - 1
+				Land(h, dot, owner, how)
+			end
+		end
+	end
+	for _, h in ipairs(hits) do
+		if not h.used then
+			local dot, owner = Candidate(h, function(d) return ns.db.dotLines[d.spellID] ~= true end)
+			if dot then Land(h, dot, owner, ns.db.dotLines[dot.spellID] == false and "school and timing" or "school and timing (log not known yet)") end
+		end
+	end
+
+	for _, h in ipairs(hits) do
+		if not h.used and IsTarget(h.unit) then
+			Trace(("other hit: school %d%s"):format(h.school, NoFlag(h.flag) and "" or ", " .. h.flag))
+		end
+	end
+	if pendingLines > 0 and traceFrom then Trace(("%d combat log line%s"):format(pendingLines, pendingLines > 1 and "s" or "")) end
+end
+
+local hits = CreateFrame("Frame")
+hits:RegisterEvent("UNIT_COMBAT")
+hits:RegisterEvent("UNIT_HEALTH")
+pcall(hits.RegisterEvent, hits, "COMBAT_LOG_MESSAGE")
+hits:SetScript("OnEvent", function(_, event, a, b, c, d, e)
+	if event == "COMBAT_LOG_MESSAGE" then
+		if not issecretvalue(e) and e == LIVE_LINE then pendingLines = pendingLines + 1 end
+		return
+	end
+	if a ~= "target" and not plates[a] then return end
+	if event == "UNIT_COMBAT" then
+		-- a = unit, b = action, c = flag, d = amount (hidden), e = school
+		if not issecretvalue(b) and not issecretvalue(e) and b == "WOUND" then
+			table.insert(pendingHits, { unit = a, flag = c, amount = d, school = e })
+		end
+	end
+	pendingPaint = true
+end)
+hits:SetScript("OnUpdate", function()
+	if #pendingHits > 0 then
+		local ok, err = pcall(MatchHits)
+		if not ok then Report(err) end
+	end
+	wipe(pendingHits)
+	pendingLines = 0
+	if pendingPaint then
+		pendingPaint = false
+		RefreshNow()
+	end
+end)
 
 -- /woe dots: what's tracked on the target and how the overlay sits, then 5 seconds of fixed test
 -- values on the target frame, to tell a drawing problem from a hidden-values one.
@@ -641,6 +949,7 @@ function ns.DotsDebug()
 	local now = GetTime()
 	ns.Print(("Target %s, remaining DoT damage %d"):format(Short(MobKey()), RemainingOn("target")))
 	ns.Print(("Shadow Word: Death damage %d (0: not known)"):format(SwdDamage()))
+	if lastError then ns.Print("Last overlay error: " .. lastError) end
 	ns.Print("Tracked DoTs (yours and your group's):")
 	for mob, list in pairs(dots) do
 		for owner, dot in pairs(list) do
@@ -674,6 +983,16 @@ end
 ns.On("PLAYER_LOGIN", function()
 	local ok, err = pcall(CreateTargetOverlay)
 	if not ok then Report(err) end
-	C_Timer.NewTicker(0.1, Refresh)
+	C_Timer.NewTicker(0.1, function() -- an error here would otherwise stop the overlay silently
+		local ok, err = pcall(Refresh)
+		if not ok then Report(err) end
+	end)
 	C_Timer.NewTicker(SYNC_EVERY, SyncThreat)
+	-- Blizzard stops combat log lines whenever the Combat Log tab is hidden; the hit matching needs
+	-- them (they still go only to that tab, as they would with it open).
+	C_Timer.NewTicker(1, function()
+		if ns.db.dotMarker and not C_CombatLog.AreFilteredEventsEnabled() then
+			pcall(C_CombatLog.SetFilteredEventsEnabled, true)
+		end
+	end)
 end)

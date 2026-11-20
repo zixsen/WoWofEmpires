@@ -285,6 +285,8 @@ SlashCmdList.WOWOFEMPIRES = function(msg)
 		ns.Fire("PLAYER_LEVEL_UP", tonumber(level) or UnitLevel("player") + 1)
 	elseif msg == "dots" then
 		ns.DotsDebug()
+	elseif msg == "dots trace" then
+		ns.DotsTrace()
 	else
 		ns.ToggleWindow()
 	end
