@@ -13,8 +13,8 @@
 -- and a tick adds to the chain exactly what it takes off the health, in the same frame. Only other
 -- damage moves the edge. Which hit was your tick: see "Ticks" below.
 --
--- Priests can also see when their target is in Shadow Word: Death range: the green turns gold once
--- one cast kills.
+-- Priests can also see when a mob is in Shadow Word: Death range: the green turns gold, on the
+-- target frame and enemy nameplates, once one cast kills.
 local addonName, ns = ...
 
 ns.defaults.dotMarker = false -- off until turned on in Settings; DoTs are shared with the group either way
@@ -57,7 +57,8 @@ end
 -- mob out of sight) counts as landed TICK_SEEN after it was due, with an estimated amount.
 -- dot.landed = ticks landed; dot.amounts = their amounts (hidden, or estimated for unseen ones);
 -- dot.firstTick = the first ordinary tick's amount, the size of the ticks still to come;
--- dot.seenAt, dot.seenTick = when the last tick seen landed, and which.
+-- dot.seenAt, dot.seenTick = when the last tick seen landed, and which;
+-- dot.unsure = the last tick booked, until its window closes (see the hit matching).
 local TICK_SEEN = 0.3 -- before any tick was seen: the first tick lands ~0.1 sec off the cast's rhythm
 local TICK_SEEN_SYNCED = 0.15 -- once one was seen, the rest land on its rhythm
 
@@ -79,6 +80,12 @@ end
 -- Damage still to come, as a plain estimate (the purple itself uses the real amounts): the ticks
 -- that haven't landed times the tooltip's share.
 local function Remaining(dot, now)
+	local u = dot.unsure
+	if u and now > u.till then -- its window closed with nothing to doubt it: the tick was the tick
+		if u.first and not dot.firstTick then dot.firstTick = u.first end
+		if u.crit then dot.amounts[u.index] = TickSize(dot) end -- a tick, plus extra damage
+		dot.unsure = nil
+	end
 	local ticks = TickCount(dot)
 	while dot.landed < ticks do -- ticks nobody saw land count once they're overdue
 		local due, window = NextTick(dot)
@@ -112,7 +119,7 @@ local function AddDot(mob, owner, total, duration, started)
 	end
 	dots[mob] = dots[mob] or {}
 	dots[mob][owner] = { total = total, duration = duration, ends = (started or now) + duration,
-		spellID = tonumber(owner:match("%d+$")), landed = 0, amounts = {} }
+		spellID = tonumber(owner:match("%d+$")), mine = owner:find("^me:") ~= nil, landed = 0, amounts = {} }
 end
 
 local function RemoveDot(mob, owner)
@@ -172,6 +179,7 @@ end
 -- The DoT belongs to the mob targeted when the cast started: by the time an instant lands you may
 -- have tabbed to the next one.
 local sentTarget = {}
+local castAt = {} -- [mob] = when your last spell at it went off, for the hit matching
 local lastCast -- for taking back a resisted or missed DoT
 
 ns.On("UNIT_SPELLCAST_SENT", function(_, _, _, castGUID)
@@ -183,6 +191,7 @@ ns.On("UNIT_SPELLCAST_SUCCEEDED", function(_, _, castGUID, spellID)
 	local mob = sentTarget[castGUID]
 	sentTarget[castGUID] = nil
 	if not mob then return end
+	castAt[mob] = GetTime()
 	-- Tracked and shared even with your own marker off, for groupmates who have theirs on.
 	local channeled = select(8, UnitChannelInfo("player"))
 	if channeled and not issecretvalue(channeled) and channeled == spellID then return end -- Mind Flay isn't a DoT
@@ -560,7 +569,9 @@ local function CreateOverlay(parent)
 	o.gate:SetPoint("BOTTOMRIGHT")
 	o.gate:SetStatusBarTexture(WHITE)
 	o.gate:SetStatusBarColor(0, 0, 0, 0)
-	o.gold = o.green:CreateTexture(nil, "ARTWORK")
+	o.over = CreateFrame("Frame", nil, o.green) -- above the purple: one cast kills, whatever the DoTs do
+	o.over:SetAllPoints(o.clip)
+	o.gold = o.over:CreateTexture(nil, "ARTWORK")
 	o.gold:SetColorTexture(1, 0.8, 0.1, 0.85)
 	o.gold:SetPoint("TOPLEFT", o.gate:GetStatusBarTexture(), "TOPRIGHT")
 	o.gold:SetPoint("BOTTOMRIGHT", o.clip, "BOTTOMRIGHT")
@@ -595,7 +606,7 @@ end
 
 -- strata nil keeps the parent's.
 local function SetLayer(o, strata, level)
-	for i, frame in ipairs({ o.clip, o.mirror, o.gate, o.green, o.fine, o.marker }) do
+	for i, frame in ipairs({ o.clip, o.mirror, o.gate, o.green, o.fine, o.marker, o.over }) do
 		if strata then frame:SetFrameStrata(strata) end
 		frame:SetFrameLevel(level + i)
 	end
@@ -674,7 +685,7 @@ local function Update(o, unit)
 	local dead = UnitIsDead(unit)
 	local alive = not (not issecretvalue(dead) and dead)
 	local damage = alive and ns.db.dotMarker and not (o == target and ns.db.dotPlatesOnly) and RemainingOn(unit) or 0
-	local swd = alive and o == target and ns.db.swdMarker and Hostile(unit) and SwdDamage() or 0
+	local swd = alive and ns.db.swdMarker and Hostile(unit) and SwdDamage() or 0
 	if (damage <= 0 and swd <= 0) or not Visible(o.bar) then return o.clip:Hide() end
 	if traceFrom and damage ~= o.traced and IsTarget(unit) then
 		o.traced = damage
@@ -791,6 +802,7 @@ end
 -- other damage of the same school (a groupmate's spell, a shadow wand: neither puts a line in your
 -- log) can't pass for the tick. Spells your filter doesn't log fall back on school and timing, which
 -- is why the filter should show all your periodic damage (drain and leech too, for Devouring Plague).
+-- Groupmates' DoTs go by school and timing too: their ticks aren't in your log.
 -- The same hit is reported once per unit showing the mob (target, nameplate) and counts once; two
 -- DoTs of one school ticking in the same instant are two hits through the same unit.
 local LIVE_LINE = Enum.CombatLogMessageOrder and Enum.CombatLogMessageOrder.Newest or 0
@@ -802,9 +814,26 @@ local function NoFlag(flag)
 	return flag == nil or issecretvalue(flag) or flag == ""
 end
 
+-- Whether the DoT's ticks show up in your combat log: learned for yours (nil until then); a
+-- groupmate's never do with the usual filter, so theirs go by school and timing.
+local function Lines(dot)
+	if dot.mine then return ns.db.dotLines[dot.spellID] end
+	return false
+end
+
+-- Whether one of your own spells may be landing on the mob right now: one went off at it within the
+-- last second (travel time), you're channeling (Mind Flay ticks), or a cast is about to finish.
+local function OwnHitNear(mob, now)
+	if castAt[mob] and now - castAt[mob] <= 1 then return true end
+	if UnitChannelInfo("player") then return true end
+	local _, _, _, _, ends = UnitCastingInfo("player")
+	if not ends then return false end
+	return issecretvalue(ends) or ends / 1000 - now <= 0.2
+end
+
 local function MatchHits()
 	local now, lines = GetTime(), pendingLines
-	local hits, firstUnit, fed = {}, {}, {}
+	local hits, firstUnit, fed, schoolHits = {}, {}, {}, {}
 	for _, h in ipairs(pendingHits) do
 		local mob = MobKey(h.unit)
 		if mob and dots[mob] then
@@ -813,6 +842,7 @@ local function MatchHits()
 			if firstUnit[key] == h.unit then
 				h.mob = mob
 				table.insert(hits, h)
+				schoolHits[mob .. ":" .. h.school] = (schoolHits[mob .. ":" .. h.school] or 0) + 1
 				for _, dot in pairs(dots[mob]) do -- its school, from its tooltip, once
 					if dot.school == nil then dot.school = select(2, ParseDot(dot.spellID)) or false end
 				end
@@ -834,12 +864,25 @@ local function MatchHits()
 		return best, bestOwner
 	end
 
-	local function Land(h, dot, owner, how)
-		fed[dot], h.used = true, true
+	-- Every tick booked stays unsure until its window closes (it settles in Remaining). A hit of its
+	-- school on the mob that turns out not to be a tick, inside that window (your Mind Blast or Mind
+	-- Flay, a groupmate's spell), means the booked one may not have been the tick either: it's then
+	-- booked at its estimated size, and so is any booking the doubted hit itself had pushed aside
+	-- (u.after). Whichever way round they came, the red's end ends up where it belongs, and it only
+	-- moves left on the way there. A crit settles at the tick size too: a tick plus extra damage.
+	-- The size of the ticks to come counts once per tick still to come, so it's only taken from a tick
+	-- that settles and is sure to be one: it came with a log line as the only hit of its school that
+	-- frame, no other hit of its school came in its window, none of your own spells was landing, and
+	-- it wasn't a crit or a resist.
+	local function Land(h, dot, owner, how, confirmed)
+		local due, window = NextTick(dot)
+		local u = { index = #dot.amounts + 1, till = due + window, at = now, seenAt = dot.seenAt, seenTick = dot.seenTick,
+			by = h, owner = owner, crit = not issecretvalue(h.flag) and h.flag == "CRITICAL" }
+		if confirmed and not dot.firstTick and NoFlag(h.flag) and not OwnHitNear(h.mob, now) then u.first = h.amount end
+		fed[dot], h.used, h.booked, dot.unsure = true, true, dot, u
 		dot.landed = dot.landed + 1
 		dot.seenAt, dot.seenTick = now, dot.landed
 		table.insert(dot.amounts, h.amount)
-		if not dot.firstTick and NoFlag(h.flag) then dot.firstTick = h.amount end -- not a crit or a resist
 		if IsTarget(h.unit) then
 			Trace(("tick: %s %d/%d by %s%s"):format(owner, dot.landed, TickCount(dot), how,
 				NoFlag(h.flag) and "" or ", " .. h.flag))
@@ -847,26 +890,27 @@ local function MatchHits()
 	end
 
 	-- Whether a spell's ticks come with a log line depends on your combat log filter, and is learned
-	-- from clean ticks: the frame's only hit, with no other DoT of its school on the mob due around
-	-- then (two DoTs of one school ticking together can't be told apart). One clean tick with a line
-	-- settles "yes" (a stray line on exactly that frame is rare, and the next clean tick corrects it);
-	-- "no" takes two in a row. Kept between sessions (ns.db.dotLines[spellID]).
+	-- from clean ticks: the frame's only hit, with no other DoT of its school on the mob due or just
+	-- ticked around then (two DoTs of one school ticking together can't be told apart), and none of
+	-- your own spells landing (Mind Flay's ticks have lines too). Two clean ticks in a row agreeing
+	-- settle it, so one stray line can't. Kept between sessions (ns.db.dotLines[spellID]).
 	if #hits == 1 then
 		local h = hits[1]
 		local only, count = nil, 0
 		for _, dot in pairs(dots[h.mob]) do
-			if dot.school == h.school and Remaining(dot, now) > 0 and math.abs(now - NextTick(dot)) <= CLEAN then
+			if dot.school == h.school and Remaining(dot, now) > 0
+				and (math.abs(now - NextTick(dot)) <= CLEAN or dot.seenAt and now - dot.seenAt <= CLEAN) then
 				only, count = dot, count + 1
 			end
 		end
-		if count == 1 and only.spellID then
+		if count == 1 and only.mine and only.spellID and not OwnHitNear(h.mob, now) then
 			local due, window = NextTick(only)
 			if math.abs(now - due) <= window then
 				local kind = lines > 0
 				local was, streak = cleanEvidence[only.spellID], cleanStreak[only.spellID] or 0
 				streak = was == kind and streak + 1 or 1
 				cleanEvidence[only.spellID], cleanStreak[only.spellID] = kind, streak
-				if streak >= (kind and 1 or 2) and ns.db.dotLines[only.spellID] ~= kind then
+				if streak >= 2 and ns.db.dotLines[only.spellID] ~= kind then
 					ns.db.dotLines[only.spellID] = kind
 					Trace(("learned: spell %d's ticks %s in your combat log"):format(only.spellID, kind and "show up" or "don't show up"))
 				end
@@ -877,29 +921,60 @@ local function MatchHits()
 	-- Hits with a line go to spells that need one, then to ones not known yet, then the rest; hits
 	-- without one never to spells that need one. So a hit of the same school that isn't your tick (a
 	-- groupmate's spell, a shadow wand) can't pass for one of a spell that shows up in your log.
-	local function Logged(value) return function(dot) return ns.db.dotLines[dot.spellID] == value end end
+	local function Logged(value) return function(dot) return Lines(dot) == value end end
 	for _, h in ipairs(hits) do
 		if lines > 0 then
+			local how, confirmed = "school, timing and a log line", schoolHits[h.mob .. ":" .. h.school] == 1
 			local dot, owner = Candidate(h, Logged(true))
-			local how = "school, timing and a log line"
-			if not dot then dot, owner = Candidate(h, Logged(nil)) how = "school and timing (log not known yet)" end
-			if not dot then dot, owner = Candidate(h, Logged(false)) how = "school and timing" end
+			if not dot then
+				how, confirmed = "school and timing (log not known yet)", false
+				dot, owner = Candidate(h, Logged(nil))
+			end
+			if not dot then
+				how = "school and timing"
+				dot, owner = Candidate(h, Logged(false))
+			end
 			if dot then
 				lines = lines - 1
-				Land(h, dot, owner, how)
+				Land(h, dot, owner, how, confirmed)
 			end
 		end
 	end
 	for _, h in ipairs(hits) do
 		if not h.used then
-			local dot, owner = Candidate(h, function(d) return ns.db.dotLines[d.spellID] ~= true end)
-			if dot then Land(h, dot, owner, ns.db.dotLines[dot.spellID] == false and "school and timing" or "school and timing (log not known yet)") end
+			local dot, owner = Candidate(h, function(d) return Lines(d) ~= true end)
+			if dot then Land(h, dot, owner, Lines(dot) == false and "school and timing" or "school and timing (log not known yet)", false) end
 		end
 	end
 
+	-- The bookings each hit came inside the window of (see Land).
+	local function Doubt(dot, u, loud)
+		if u.done then return end
+		u.done = true
+		if dot.unsure == u then dot.unsure = nil end
+		dot.amounts[u.index] = TickSize(dot)
+		if dot.seenAt == u.at then dot.seenAt, dot.seenTick = u.seenAt, u.seenTick end -- no tick seen since
+		if loud then Trace(("tick: %s %d/%d booked at its estimated size instead"):format(u.owner, u.index, TickCount(dot))) end
+		for _, prior in ipairs(u.after or {}) do Doubt(prior.dot, prior.u, loud) end
+	end
 	for _, h in ipairs(hits) do
-		if not h.used and IsTarget(h.unit) then
-			Trace(("other hit: school %d%s"):format(h.school, NoFlag(h.flag) and "" or ", " .. h.flag))
+		local inside = {}
+		for _, dot in pairs(dots[h.mob]) do
+			local u = dot.unsure
+			if u and u.by ~= h and dot.school == h.school and now <= u.till then
+				u.first = nil
+				table.insert(inside, { dot = dot, u = u })
+			end
+		end
+		local u = h.used and h.booked.unsure
+		if u and u.by == h then
+			u.after = inside
+			if #inside > 0 then u.first = nil end
+		elseif not h.used then
+			for _, prior in ipairs(inside) do Doubt(prior.dot, prior.u, IsTarget(h.unit)) end
+			if IsTarget(h.unit) then
+				Trace(("other hit: school %d%s"):format(h.school, NoFlag(h.flag) and "" or ", " .. h.flag))
+			end
 		end
 	end
 	if pendingLines > 0 and traceFrom then Trace(("%d combat log line%s"):format(pendingLines, pendingLines > 1 and "s" or "")) end

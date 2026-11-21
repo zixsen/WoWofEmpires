@@ -8,4 +8,5 @@ core.lua
 dots.lua
 clicktarget.lua
 portraits.lua
+chatlock.lua
 ui.lua

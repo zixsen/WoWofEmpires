@@ -118,7 +118,7 @@ local function BuildSettingsPage(page)
 	CreateHeader(page, 16, -150, "Combat")
 	CreateCheckbox(page, -174, "Show when DoTs will kill (target frame and nameplates)", SavedOption("dotMarker"))
 	CreateCheckbox(page, -200, "Only show DoTs on nameplates, not the target frame", SavedOption("dotPlatesOnly"))
-	CreateCheckbox(page, -226, "Turn the target gold in Shadow Word: Death range", SavedOption("swdMarker"))
+	CreateCheckbox(page, -226, "Turn mobs gold in Shadow Word: Death range", SavedOption("swdMarker"))
 	CreateCheckbox(page, -252, "Shift/Ctrl/Alt-click targets unit frames",
 		function() return ns.db.modifierTarget end,
 		function(on)
@@ -143,7 +143,7 @@ local function BuildSettingsPage(page)
 		slider:Init(volume, 0, 1, 20, { [MinimalSliderWithSteppersMixin.Label.Right] = Percent })
 	end)
 
-	CreateHeader(page, 16, -374, "Messages")
+	CreateHeader(page, 16, -374, "Chat")
 	local chatNote = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
 	chatNote:SetPoint("TOPLEFT", 16, -396)
 	chatNote:SetText("Chat tab for level-ups and other addon messages.")
@@ -163,6 +163,13 @@ local function BuildSettingsPage(page)
 			end
 		end
 	end)
+
+	CreateCheckbox(page, -448, "Unlock Window for the main chat (General tab menu)",
+		function() return ns.db.chatLock end,
+		function(on)
+			ns.db.chatLock = on
+			if not on and ns.ResetChatLock then ns.ResetChatLock() end
+		end)
 end
 
 ------------------------------------------------------------------------
@@ -222,7 +229,7 @@ end
 local function CreateWindow()
 	window = CreateFrame("Frame", "WoWofEmpiresFrame", UIParent, "ButtonFrameTemplate")
 	window:Hide()
-	window:SetSize(360, 556)
+	window:SetSize(360, 590)
 	window:SetPoint("CENTER")
 	window:SetToplevel(true)
 	window:SetClampedToScreen(true)
