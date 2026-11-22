@@ -1,3 +1,5 @@
 # Keep repo plumbing out of the release zip.
 .github export-ignore
 .gitattributes export-ignore
+uploader export-ignore
+incoming export-ignore

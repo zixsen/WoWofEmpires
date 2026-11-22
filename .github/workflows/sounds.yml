@@ -1,0 +1,70 @@
+# Sounds uploaded through the uploader page (uploader/worker.js) arrive as incoming/<chat word>. Each
+# becomes a .ogg in sound/ (cut to 10 sec, volume evened out to about the other sounds' level) with its
+# word added to ns.words in core.lua, and a release goes out with the next patch version. The release
+# is made here: a tag pushed by this workflow doesn't start release.yml (GitHub's rule for its token).
+name: Add sounds
+on:
+  push:
+    branches: [forever-port]
+    paths: ["incoming/**"]
+concurrency: sounds # one at a time; a waiting run takes every upload that has arrived by then
+permissions:
+  contents: write
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: forever-port # the latest, not the commit that started this run
+          fetch-depth: 0
+      - name: Add the sounds and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          uploads=(incoming/*)
+          [ ${#uploads[@]} -gt 0 ] || exit 0 # an earlier run already took them
+          command -v ffmpeg > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
+          added=() dropped=()
+          file_taken() { # sound/<word>.ogg, in any capitals (one file on Windows)
+            local file
+            for file in sound/*; do [[ "${file,,}" == "sound/${1,,}.ogg" ]] && return 0; done
+            return 1
+          }
+          for upload in "${uploads[@]}"; do
+            word=${upload#incoming/}
+            # Same rules as the page, and the word and its file name must be free.
+            if [[ "$word" =~ ^[a-z0-9]+( [a-z0-9]+)*$ && "$word" =~ [a-z] && ${#word} -ge 2 && ${#word} -le 24 ]] &&
+              ! grep -qF "[\"$word\"]" core.lua && ! file_taken "$word"; then
+              if ffmpeg -nostdin -loglevel error -n -i "$upload" -t 10 -vn -ac 1 -af loudnorm=I=-16:TP=-1.5 -c:a libvorbis -q:a 4 "sound/$word.ogg"; then
+                # A line at the top of ns.words; core.lua has Windows line endings.
+                perl -i -pe 'BEGIN { $word = shift } $_ .= "\t[\"$word\"] = \"$word.ogg\",\r\n" if /^ns\.words = \{/' "$word" core.lua
+                added+=("$word")
+              else
+                rm -f "sound/$word.ogg" # a half-written file; nothing was there before (checked above)
+                dropped+=("$word")
+              fi
+            else
+              dropped+=("$word")
+            fi
+            git rm -q "$upload"
+          done
+          list() { local IFS=,; echo "$*" | sed 's/,/, /g'; }
+          message="Add sounds: $(list "${added[@]}")"
+          [ ${#added[@]} -gt 0 ] || message="Drop sound uploads that couldn't be used: $(list "${dropped[@]}")"
+          git add sound core.lua
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qm "$message"
+          git pull -q --rebase origin forever-port # a new upload may have come in meanwhile; its own run follows
+          git push -q origin HEAD:forever-port
+          [ ${#added[@]} -gt 0 ] || exit 0
+
+          last=$(git tag --list "v*" --sort=-v:refname | sed -n 1p)
+          IFS=. read -r major minor patch <<< "${last#v}"
+          tag="v$major.$minor.$((patch + 1))"
+          git tag "$tag"
+          git push -q origin "$tag"
+          git archive --format=zip --prefix=WoWofEmpires/ -o "WoWofEmpires-$tag-forever.zip" HEAD
+          gh release create "$tag" "WoWofEmpires-$tag-forever.zip" --repo "$GITHUB_REPOSITORY" --title "$tag" --notes "New sounds: $(list "${added[@]}")"
