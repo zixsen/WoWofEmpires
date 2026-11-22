@@ -276,11 +276,12 @@ local function OnChat(event, text, sender)
 	PlayKey(tonumber(text) or lower)
 end
 
-for _, event in ipairs({
+local CHAT_EVENTS = {
 	-- WHISPER_INFORM is your own outgoing whisper, so the sender hears it too.
 	"CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE", "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM", "CHAT_MSG_GUILD",
 	"CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
-}) do
+}
+for _, event in ipairs(CHAT_EVENTS) do
 	On(event, OnChat)
 end
 
@@ -317,11 +318,42 @@ end
 -- For dots.lua, which shares DoT casts with the group.
 ns.PREFIX, ns.SendToGroup, ns.IsMe = PREFIX_BLINK, SendToGroup, IsMe
 
+local function MissingLine(name, key)
+	ns.Print(("%s played %s, a sound you don't have yet. Update WoW of Empires to hear it."):format(name, key))
+end
+
 -- Window click: plays the sound for you and your group (just you when solo).
 -- "Döds Maskinen played Zulp Hype (hype)" in the addon's chat tab, for the clicker and everyone who hears it.
 local function SoundLine(name, key)
 	local file = ns.SoundFor(key)
-	ns.Print(("%s played %s (%s)"):format(name, file and ns.LabelFor(file) or key, key))
+	if not file then return MissingLine(name, key) end
+	ns.Print(("%s played %s (%s)"):format(name, ns.LabelFor(file), key))
+end
+
+-- Sounds newer than yours: saying a sound word in chat also sends the word, silently, to everyone
+-- with the addon. Someone who saw you say it but doesn't have that sound is told to update. Only the
+-- last line and word per player are kept; the two arrive within a moment of each other, in either order.
+local said, sent = {}, {} -- [player] = { word = ..., at = GetTime() }
+
+local function Match(mine, other, name, word)
+	mine[name] = { word = word, at = GetTime() }
+	local seen = other[name]
+	if seen and seen.word == word and GetTime() - seen.at < 10 then
+		mine[name], other[name] = nil, nil -- once, though the channel and the group both deliver the word
+		MissingLine(name, word)
+	end
+end
+
+for _, event in ipairs(CHAT_EVENTS) do
+	On(event, function(_, text, sender)
+		if issecretvalue(text) or issecretvalue(sender) then return end
+		local word = text:lower() -- the whole message, as OnChat matches it
+		if event == "CHAT_MSG_WHISPER_INFORM" or IsMe(sender) then
+			if ns.words[word] then SendToAddonUsers("word:" .. word) end
+		elseif not ns.SoundFor(tonumber(text) or word) then
+			Match(said, sent, Ambiguate(sender, "short"), word)
+		end
+	end)
 end
 
 function ns.Broadcast(key)
@@ -349,7 +381,10 @@ On("CHAT_MSG_ADDON", function(_, prefix, text, channel, sender)
 	local level = prefix == PREFIX_BLINK and text:match("^levelup:(%d+)$")
 	-- Clicked sounds are for your group only; older versions still send them to everyone when solo.
 	local key = prefix == PREFIX_BLINK and channel ~= "CHANNEL" and text:match("^play:(.+)$")
-	if level then
+	local word = prefix == PREFIX_BLINK and text:match("^word:([a-z0-9 ]+)$") -- sound words are plain, so nothing else gets printed
+	if word then
+		if not IsMe(sender) and not ns.words[word] then Match(sent, said, Ambiguate(sender, "short"), word) end
+	elseif level then
 		local name = Ambiguate(sender, "short")
 		if AnnounceLevel(name, level) then
 			ns.Print(name .. " LEVELED UP to " .. level .. "!")
