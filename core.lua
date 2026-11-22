@@ -317,7 +317,7 @@ end
 -- For dots.lua, which shares DoT casts with the group.
 ns.PREFIX, ns.SendToGroup, ns.IsMe = PREFIX_BLINK, SendToGroup, IsMe
 
--- Window click: plays the sound for you and your group, or for everyone with the addon when solo.
+-- Window click: plays the sound for you and your group (just you when solo).
 -- "Döds Maskinen played Zulp Hype (hype)" in the addon's chat tab, for the clicker and everyone who hears it.
 local function SoundLine(name, key)
 	local file = ns.SoundFor(key)
@@ -327,9 +327,7 @@ end
 function ns.Broadcast(key)
 	PlayKey(key)
 	SoundLine(MyName(), key)
-	if not SendToGroup("play:" .. key) then
-		SendToAddonUsers("play:" .. key)
-	end
+	SendToGroup("play:" .. key)
 end
 
 -- One Snoop per player per level, however many copies of the news arrive: the channel and party
@@ -346,10 +344,11 @@ local function AnnounceLevel(name, level)
 	return true
 end
 
-On("CHAT_MSG_ADDON", function(_, prefix, text, _, sender)
-	if issecretvalue(prefix) or issecretvalue(text) or issecretvalue(sender) then return end
+On("CHAT_MSG_ADDON", function(_, prefix, text, channel, sender)
+	if issecretvalue(prefix) or issecretvalue(text) or issecretvalue(channel) or issecretvalue(sender) then return end
 	local level = prefix == PREFIX_BLINK and text:match("^levelup:(%d+)$")
-	local key = prefix == PREFIX_BLINK and text:match("^play:(.+)$")
+	-- Clicked sounds are for your group only; older versions still send them to everyone when solo.
+	local key = prefix == PREFIX_BLINK and channel ~= "CHANNEL" and text:match("^play:(.+)$")
 	if level then
 		local name = Ambiguate(sender, "short")
 		if AnnounceLevel(name, level) then
