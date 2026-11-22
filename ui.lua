@@ -116,9 +116,16 @@ local function BuildSettingsPage(page)
 		function(on) C_CVar.SetCVar("displayFreeBagSlots", on and "1" or "0") end)
 
 	CreateHeader(page, 16, -150, "Combat")
-	CreateCheckbox(page, -174, "Show when DoTs will kill (target frame and nameplates)", SavedOption("dotMarker"))
+	-- These two decide whether the addon touches nameplates at all.
+	local function PlateOption(key)
+		return function() return ns.db[key] end, function(on)
+			ns.db[key] = on
+			ns.UpdatePlates()
+		end
+	end
+	CreateCheckbox(page, -174, "Show when DoTs will kill (target frame and nameplates)", PlateOption("dotMarker"))
 	CreateCheckbox(page, -200, "Only show DoTs on nameplates, not the target frame", SavedOption("dotPlatesOnly"))
-	CreateCheckbox(page, -226, "Turn mobs gold in Shadow Word: Death range", SavedOption("swdMarker"))
+	CreateCheckbox(page, -226, "Turn mobs gold in Shadow Word: Death range", PlateOption("swdMarker"))
 	CreateCheckbox(page, -252, "Shift/Ctrl/Alt-click targets unit frames",
 		function() return ns.db.modifierTarget end,
 		function(on)

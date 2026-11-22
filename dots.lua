@@ -739,8 +739,14 @@ end
 
 -- Nameplates: Blizzard reuses plate frames, so each gets one overlay, parented to the plate and a few
 -- levels above its health bar. Plates Forever forbids to addons come back nil and are skipped.
+-- Nameplates are left alone (no overlay, not watched) unless the DoT or Shadow Word: Death option is on.
 local overlayByPlate = {}
-ns.On("NAME_PLATE_UNIT_ADDED", function(_, unit)
+
+local function PlatesWanted()
+	return ns.db and (ns.db.dotMarker or ns.db.swdMarker)
+end
+
+local function AddPlate(unit)
 	local plate = C_NamePlate.GetNamePlateForUnit(unit)
 	local bar = plate and plate.UnitFrame and plate.UnitFrame.healthBar
 	if not bar then return end
@@ -755,16 +761,34 @@ ns.On("NAME_PLATE_UNIT_ADDED", function(_, unit)
 	plates[unit] = o
 	ScanAuras(unit, true) -- debuffs and threat already on it aren't new
 	ScanThreat(unit, true)
-end)
+end
 
-ns.On("NAME_PLATE_UNIT_REMOVED", function(_, unit)
+local function RemovePlate(unit)
 	auraIDs[unit] = nil
 	onThreatList[unit] = nil
 	if plates[unit] then
 		plates[unit].clip:Hide()
 		plates[unit] = nil
 	end
+end
+
+ns.On("NAME_PLATE_UNIT_ADDED", function(_, unit)
+	if PlatesWanted() then AddPlate(unit) end
 end)
+ns.On("NAME_PLATE_UNIT_REMOVED", function(_, unit) RemovePlate(unit) end)
+
+-- Settings: turning an option on covers the plates already on screen; turning both off lets go of
+-- them (the hidden overlays stay on Blizzard's plate frames until a /reload).
+function ns.UpdatePlates()
+	if PlatesWanted() then
+		for i = 1, 100 do
+			local unit = "nameplate" .. i
+			if not plates[unit] and UnitExists(unit) then AddPlate(unit) end
+		end
+	else
+		for unit in pairs(plates) do RemovePlate(unit) end
+	end
+end
 
 local testUntil -- /woe dots paints fixed values on the target frame until this time
 local raisedAt = 0
