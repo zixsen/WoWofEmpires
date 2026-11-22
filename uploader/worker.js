@@ -12,18 +12,6 @@ const MAX_BYTES = 2 * 1024 * 1024;
 
 export default {
 	async fetch(request, env) {
-		if (request.method !== "POST") return page();
-		const form = await request.formData();
-		const word = String(form.get("word") || "").trim().toLowerCase().replace(/\s+/g, " ");
-		const file = form.get("file");
-		if (!env.PASSWORD || form.get("password") !== env.PASSWORD) return page("Fel lösenord.");
-		// The whole chat message has to match the word. Letters needed: messages that are numbers play the taunts.
-		if (!/^[a-z0-9]+( [a-z0-9]+)*$/.test(word) || !/[a-z]/.test(word) || word.length < 2 || word.length > 24) {
-			return page("Ordet får bara ha a–z och 0–9 (inga å, ä eller ö), 2 till 24 tecken. Mellanslag mellan orden går bra.");
-		}
-		if (!(file instanceof File) || file.size === 0) return page("Välj en ljudfil.");
-		if (file.size > MAX_BYTES) return page("Filen är större än 2 MB.");
-
 		const github = (path, init = {}) => fetch(`https://api.github.com/repos/${REPO}/${path}`, {
 			...init,
 			headers: {
@@ -33,19 +21,62 @@ export default {
 				...init.headers,
 			},
 		});
-		const core = await github(`contents/core.lua?ref=${BRANCH}`, { headers: { Accept: "application/vnd.github.raw" } });
-		if (!core.ok) return page("Kunde inte nå GitHub. Försök igen om en stund.");
-		if ((await core.text()).includes(`["${word}"]`)) return page(`"${word}" har redan ett ljud.`);
+		const raw = { headers: { Accept: "application/vnd.github.raw" } };
+		// The sounds there already, for the list on the page, its play buttons and the "taken" check.
+		const core = await github(`contents/core.lua?ref=${BRANCH}`, raw);
+		const sounds = core.ok ? Sounds(await core.text()) : null;
+		const reply = (message, ok) => page(message, ok, sounds);
+
+		// /ljud/<file>: a listed sound, for its play button. Served from here: GitHub's own file links
+		// can be blocked by browsers when another site plays them.
+		const path = new URL(request.url).pathname;
+		if (path.startsWith("/ljud/")) {
+			let name = "";
+			try { name = decodeURIComponent(path.slice("/ljud/".length)); } catch {}
+			if (!sounds?.some((s) => s.file === name)) return new Response("Finns inte", { status: 404 });
+			const audio = await github(`contents/sound/${encodeURIComponent(name)}?ref=${BRANCH}`, raw);
+			if (!audio.ok) return new Response("Kunde inte hämta ljudet", { status: 502 });
+			return new Response(audio.body, {
+				headers: { "content-type": name.endsWith(".ogg") ? "audio/ogg" : "audio/mpeg", "cache-control": "public, max-age=3600" },
+			});
+		}
+		if (request.method !== "POST") return reply();
+
+		const form = await request.formData();
+		const word = String(form.get("word") || "").trim().toLowerCase().replace(/\s+/g, " ");
+		const file = form.get("file");
+		if (!env.PASSWORD || form.get("password") !== env.PASSWORD) return reply("Fel lösenord.");
+		// The whole chat message has to match the word. Letters needed: messages that are numbers play the taunts.
+		if (!/^[a-z0-9]+( [a-z0-9]+)*$/.test(word) || !/[a-z]/.test(word) || word.length < 2 || word.length > 24) {
+			return reply("Ordet får bara ha a–z och 0–9 (inga å, ä eller ö), 2 till 24 tecken. Mellanslag mellan orden går bra.");
+		}
+		if (!(file instanceof File) || file.size === 0) return reply("Välj en ljudfil.");
+		if (file.size > MAX_BYTES) return reply("Filen är större än 2 MB.");
+		if (!sounds) return reply("Kunde inte nå GitHub. Försök igen om en stund.");
+		if (sounds.some((s) => s.word === word)) return reply(`"${word}" har redan ett ljud.`);
 
 		const saved = await github(`contents/incoming/${encodeURIComponent(word)}`, {
 			method: "PUT",
 			body: JSON.stringify({ message: `Upload sound: ${word}`, content: base64(await file.arrayBuffer()), branch: BRANCH }),
 		});
-		if (saved.status === 422) return page(`Någon annan laddade precis upp "${word}".`); // the file already exists
-		if (!saved.ok) return page("Kunde inte spara ljudet. Försök igen om en stund.");
-		return page(`Klart! "${word}" kommer med i nästa WowUp-uppdatering, om några minuter.`, true);
+		if (saved.status === 422) return reply(`Någon annan laddade precis upp "${word}".`); // the file already exists
+		if (!saved.ok) return reply("Kunde inte spara ljudet. Försök igen om en stund.");
+		return reply(`Klart! "${word}" kommer med i nästa WowUp-uppdatering, om några minuter.`, true);
 	},
 };
+
+// ns.words in core.lua as [{ word, file }], sorted by word.
+function Sounds(coreLua) {
+	const table = coreLua.match(/^ns\.words = \{([^]*?)^\}/m);
+	if (!table) return [];
+	return [...table[1].matchAll(/\["([^"]+)"\]\s*=\s*"([^"]+)"/g)]
+		.map((m) => ({ word: m[1], file: m[2] }))
+		.sort((a, b) => a.word.localeCompare(b.word, "sv"));
+}
+
+function escape(text) {
+	return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
 
 function base64(buffer) {
 	const bytes = new Uint8Array(buffer);
@@ -54,8 +85,24 @@ function base64(buffer) {
 	return btoa(text);
 }
 
-// Messages only ever contain the checked word (letters, digits, spaces), so they need no escaping.
-function page(message = "", ok = false) {
+// Messages only ever contain the checked word (letters, digits, spaces), so they need no escaping;
+// the list's words and file names come from core.lua and are escaped.
+function page(message = "", ok = false, sounds = null) {
+	const list = sounds?.length ? `
+<h2>Ljud som redan finns (${sounds.length})</h2>
+<ul class="sounds">
+${sounds.map((s) => `	<li><button type="button" data-src="ljud/${encodeURIComponent(s.file)}" aria-label="Spela ${escape(s.word)}">▶</button> ${escape(s.word)}</li>`).join("\n")}
+</ul>
+<script>
+	let playing;
+	document.querySelector(".sounds").addEventListener("click", (event) => {
+		const button = event.target.closest("button");
+		if (!button) return;
+		playing?.pause();
+		playing = new Audio(button.dataset.src);
+		playing.play();
+	});
+</script>` : "";
 	return new Response(`<!doctype html>
 <html lang="sv">
 <meta charset="utf-8">
@@ -69,6 +116,10 @@ function page(message = "", ok = false) {
 	button { font: inherit; margin-top: 1.6em; padding: 0.5em 1.6em; }
 	.message { padding: 0.6em 0.8em; border-left: 4px solid var(--${ok ? "ok" : "bad"}); }
 	.hint { opacity: 0.75; font-size: 0.9em; }
+	h2 { margin-top: 2em; font-size: 1.2em; }
+	.sounds { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 0.4em 1em; }
+	.sounds li { overflow-wrap: anywhere; }
+	.sounds button { margin: 0 0.3em 0 0; padding: 0.1em 0.55em; }
 </style>
 <h1>Lägg till ett ljud i WoW of Empires</h1>
 <p>Skriv ordet i party, raid, guild, say eller whisper så hör alla som har addonen ljudet.
@@ -85,5 +136,6 @@ ${message ? `<p class="message">${message}</p>` : ""}
 	<input id="password" type="password" name="password" required>
 	<button>Ladda upp</button>
 </form>
+${list}
 `, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
