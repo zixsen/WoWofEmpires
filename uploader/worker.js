@@ -22,6 +22,16 @@ export default {
 			},
 		});
 		const raw = { headers: { Accept: "application/vnd.github.raw" } };
+		const path = new URL(request.url).pathname;
+
+		// An upload's password is checked before anything reaches GitHub, so wrong guesses can't use up
+		// the token's rate limit. The page for a wrong one goes without the sound list for that reason.
+		let form;
+		if (request.method === "POST" && !path.startsWith("/ljud/")) {
+			form = await request.formData();
+			if (!env.PASSWORD || form.get("password") !== env.PASSWORD) return page("Fel lösenord.");
+		}
+
 		// The sounds there already, for the list on the page, its play buttons and the "taken" check.
 		const core = await github(`contents/core.lua?ref=${BRANCH}`, raw);
 		const sounds = core.ok ? Sounds(await core.text()) : null;
@@ -29,7 +39,6 @@ export default {
 
 		// /ljud/<file>: a listed sound, for its play button. Served from here: GitHub's own file links
 		// can be blocked by browsers when another site plays them.
-		const path = new URL(request.url).pathname;
 		if (path.startsWith("/ljud/")) {
 			let name = "";
 			try { name = decodeURIComponent(path.slice("/ljud/".length)); } catch {}
@@ -40,12 +49,10 @@ export default {
 				headers: { "content-type": name.endsWith(".ogg") ? "audio/ogg" : "audio/mpeg", "cache-control": "public, max-age=3600" },
 			});
 		}
-		if (request.method !== "POST") return reply();
+		if (!form) return reply();
 
-		const form = await request.formData();
 		const word = String(form.get("word") || "").trim().toLowerCase().replace(/\s+/g, " ");
 		const file = form.get("file");
-		if (!env.PASSWORD || form.get("password") !== env.PASSWORD) return reply("Fel lösenord.");
 		// The whole chat message has to match the word. Letters needed: messages that are numbers play the taunts.
 		if (!/^[a-z0-9]+( [a-z0-9]+)*$/.test(word) || !/[a-z]/.test(word) || word.length < 2 || word.length > 24) {
 			return reply("Ordet får bara ha a–z och 0–9 (inga å, ä eller ö), 2 till 24 tecken. Mellanslag mellan orden går bra.");
