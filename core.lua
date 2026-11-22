@@ -53,6 +53,7 @@ ns.taunts = {
 }
 
 ns.words = {
+	["npc"] = "npc.ogg",
 	["nosucharmy"] = "nosucharmy.ogg",
 	["trollface"] = "trollface.ogg",
 	["spartans"] = "spartans.ogg",
