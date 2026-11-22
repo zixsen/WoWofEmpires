@@ -264,8 +264,13 @@ local function PlayKey(key)
 	end
 end
 
--- /woe chat: prints every chat and community event as it arrives (its first 9 values) and what the
--- sound triggers make of it, to see why a word didn't play.
+-- Every copy of the addon joins this channel, so messages reach all addon users on the realm,
+-- grouped or not. Chat windows never show it (Blizzard only auto-adds regional channels).
+-- Joined a bit after login so General and Trade keep their usual /1 and /2.
+local ADDON_CHANNEL = "WoWofEmpires"
+
+-- /woe chat: prints every chat and community event as it arrives (its first 9 values), the addon's
+-- own sound messages, and what the sound triggers make of them, to see why a word didn't play.
 local tracing = false
 local tracer = CreateFrame("Frame")
 tracer:SetScript("OnEvent", function(_, event, ...)
@@ -282,7 +287,10 @@ function ns.ChatTrace()
 	tracing = not tracing
 	if tracing then tracer:RegisterAllEvents() else tracer:UnregisterAllEvents() end
 	ns.Print("Chat trace " .. (tracing and "on" or "off") .. ".")
-	if tracing and ns.hookErrors then ns.Print("Can't see what you send to communities and channels:" .. ns.hookErrors) end
+	if not tracing then return end
+	if ns.hookErrors then ns.Print("Can't see what you send to communities and channels:" .. ns.hookErrors) end
+	local channel = GetChannelName(ADDON_CHANNEL)
+	ns.Print(channel > 0 and ("In the addon channel (/%d)."):format(channel) or "Not in the addon channel: only your group and guild hear the addon.")
 end
 
 local function Trace(message)
@@ -320,11 +328,6 @@ end
 
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_BLINK)
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_KOS)
-
--- Every copy of the addon joins this channel, so messages reach all addon users on the realm,
--- grouped or not. Chat windows never show it (Blizzard only auto-adds regional channels).
--- Joined a bit after login so General and Trade keep their usual /1 and /2.
-local ADDON_CHANNEL = "WoWofEmpires"
 
 On("PLAYER_LOGIN", function()
 	-- Forever's UI only uses JoinPermanentChannel; the temporary one (not saved between logins) is preferred if it's there.
@@ -364,8 +367,10 @@ local function SoundLine(name, key)
 end
 
 -- Sounds newer than yours: saying a sound word in chat also sends the word, silently, to everyone
--- with the addon. Someone who saw you say it but doesn't have that sound is told to update. Only the
--- last line and word per player are kept; the two arrive within a moment of each other, in either order.
+-- with the addon, and straight to whoever got the line (the one whispered, the guild) in case the
+-- shared channel doesn't reach them. Someone who saw you say it but doesn't have that sound is told
+-- to update. Only the last line and word per player are kept; the two arrive within a moment of
+-- each other, in either order.
 local said, sent = {}, {} -- [player] = { word = ..., at = GetTime() }
 
 local function Match(mine, other, name, word)
@@ -382,7 +387,13 @@ for _, event in ipairs(CHAT_EVENTS) do
 		if issecretvalue(text) or issecretvalue(sender) then return end
 		local word = text:lower() -- the whole message, as OnChat matches it
 		if event == "CHAT_MSG_WHISPER_INFORM" or IsMe(sender) then
-			if ns.words[word] then SendToAddonUsers("word:" .. word) end
+			if not ns.words[word] then return end
+			SendToAddonUsers("word:" .. word)
+			if event == "CHAT_MSG_WHISPER_INFORM" then -- sender is the one you whispered
+				C_ChatInfo.SendAddonMessage(PREFIX_BLINK, "word:" .. word, "WHISPER", sender)
+			elseif event == "CHAT_MSG_GUILD" and IsInGuild() then
+				C_ChatInfo.SendAddonMessage(PREFIX_BLINK, "word:" .. word, "GUILD")
+			end
 		elseif not ns.SoundFor(tonumber(text) or word) then
 			Match(said, sent, Ambiguate(sender, "short"), word)
 		end
@@ -392,19 +403,19 @@ end
 -- Communities and custom channels: Blizzard hides what's said there from addons (the text comes as
 -- a code that only the chat window turns back into words), so the sender's copy tells the others.
 -- Sending a sound word to such a channel plays it for you and sends "chan:<word>:<channel>" over the
--- addon channel; only players in that channel (a member, for a community) play it. Zone channels
--- (General, Trade) are left out, and so is guild chat sent from the Communities window: it already
--- plays as guild chat.
+-- addon channel, your group and your guild (members are often there too, should the shared channel
+-- not reach them); only players in that channel (a member, for a community) play it, once. Zone
+-- channels (General, Trade) are left out, and so is guild chat sent from the Communities window: it
+-- already plays as guild chat.
 local function SendChannelSound(text, channelName)
 	if not channelName or issecretvalue(text) or issecretvalue(channelName) then return end
 	local key = tonumber(text) or text:lower()
 	if not ns.SoundFor(key) then return end
 	Trace(("you sent %s to %s"):format(key, channelName))
 	PlayKey(key)
-	local channel = GetChannelName(ADDON_CHANNEL)
-	if channel > 0 then
-		C_ChatInfo.SendAddonMessage(PREFIX_BLINK, ("chan:%s:%s"):format(key, channelName), "CHANNEL", tostring(channel))
-	end
+	local message = ("chan:%s:%s"):format(key, channelName)
+	SendToAddonUsers(message)
+	if IsInGuild() then C_ChatInfo.SendAddonMessage(PREFIX_BLINK, message, "GUILD") end
 end
 
 -- After the message is sent. In case Forever won't let these be hooked, /woe chat says so.
@@ -426,11 +437,17 @@ Hook(C_Club, "SendMessage", function(clubId, streamId, text)
 	end
 end)
 
+-- A community is checked against the ones you're in (its ID compared as text, whatever type the API
+-- uses for it); a custom channel by whether you've joined it.
 local function InChannel(channelName)
 	local clubId = channelName:match("^Community:(%d+):")
-	if clubId then return C_Club.GetClubInfo(tonumber(clubId)) ~= nil end
-	return GetChannelName(channelName) > 0
+	if not clubId then return GetChannelName(channelName) > 0 end
+	for _, club in ipairs(C_Club.GetSubscribedClubs() or {}) do
+		if not issecretvalue(club.clubId) and tostring(club.clubId) == clubId then return true end
+	end
+	return false
 end
+local chanHeard = {} -- [sender] = { key = "<word>:<channel>", at }: one sound however many routes bring it
 
 function ns.Broadcast(key)
 	PlayKey(key)
@@ -460,13 +477,19 @@ On("CHAT_MSG_ADDON", function(_, prefix, text, channel, sender)
 	local word = prefix == PREFIX_BLINK and text:match("^word:([a-z0-9 ]+)$") -- sound words are plain, so nothing else gets printed
 	local chanWord, chanName
 	if prefix == PREFIX_BLINK then chanWord, chanName = text:match("^chan:([a-z0-9 ]+):(.+)$") end
+	if prefix == PREFIX_BLINK and (word or chanWord or key) then
+		Trace(("addon message from %s over %s: %s"):format(sender, channel, text))
+	end
 	if chanWord then
 		local name = Ambiguate(sender, "short")
-		Trace(("%s sent %s to %s%s"):format(name, chanWord, chanName, InChannel(chanName) and "" or " (you're not in it)"))
-		if not IsMe(sender) and InChannel(chanName) then
-			local key = tonumber(chanWord) or chanWord
-			if ns.SoundFor(key) then PlayKey(key) else MissingLine(name, key) end
-		end
+		local okIn, inside = pcall(InChannel, chanName)
+		inside = okIn and inside
+		Trace(("%s sent %s to %s%s"):format(name, chanWord, chanName, inside and "" or " (you're not in it)"))
+		local heard, id = chanHeard[name], chanWord .. ":" .. chanName
+		if IsMe(sender) or not inside or heard and heard.key == id and GetTime() - heard.at < 3 then return end
+		chanHeard[name] = { key = id, at = GetTime() }
+		local key = tonumber(chanWord) or chanWord
+		if ns.SoundFor(key) then PlayKey(key) else MissingLine(name, key) end
 	elseif word then
 		if not IsMe(sender) and not ns.words[word] then Match(sent, said, Ambiguate(sender, "short"), word) end
 	elseif level then

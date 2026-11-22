@@ -158,12 +158,13 @@ end
 -- "40 Fire damage over 15 sec" -> 40, Fire's school mask, 15. Not DoTs on your target, though the
 -- wording matches (checked against every Forever damage tooltip): area spells, Renew ("Heals the
 -- target of 222 damage over 15 sec"), weapon poisons ("Coats a weapon...") and Immolation Trap.
+-- From 1,000 up the amount has a thousands comma ("1,015"), which must not cut it to "015".
 local function ParseDot(spellID)
 	local text = C_Spell.GetSpellDescription(spellID)
 	if not text or issecretvalue(text) or text:find("^Heals") or text:find("^Coats a weapon") or text:find("trap") then return end
 	if text:find("area") or text:find("all enemies") or text:find("nearby") then return end
-	local amount, school, duration = text:match("(%d+) (%a*) ?damage over (%d+) sec")
-	if amount then return tonumber(amount), SCHOOL_MASK[school] or 1, tonumber(duration) end
+	local amount, school, duration = text:match("(%d[%d,]*) (%a*) ?damage over (%d+) sec")
+	if amount then return tonumber((amount:gsub(",", ""))), SCHOOL_MASK[school] or 1, tonumber(duration) end
 end
 
 ------------------------------------------------------------------------
@@ -740,25 +741,65 @@ end
 -- Nameplates: Blizzard reuses plate frames, so each gets one overlay, parented to the plate and a few
 -- levels above its health bar. Plates Forever forbids to addons come back nil and are skipped.
 -- Nameplates are left alone (no overlay, not watched) unless the DoT or Shadow Word: Death option is on.
-local overlayByPlate = {}
+-- Nameplate addons: where one draws the plate, Blizzard's bar is hidden, so the overlay goes on that
+-- addon's health bar instead, as part of the addon's own plate frame (it scales and fades with it).
+-- PLATE_BARS knows where each keeps its bar; the first visible one wins, Blizzard's own is the
+-- fallback. An addon can hand a plate back to Blizzard at any time, so the bar is looked up again on
+-- every repaint. Addons not listed get nothing: their plate covers Blizzard's (hidden) bar.
+local PLATE_BARS = {
+	function(plate) -- Threat Plates: its plate frame (parented elsewhere), Active while it draws the unit
+		local tp = plate.TPFrame
+		if type(tp) == "table" and tp.Active and type(tp.visual) == "table" then return tp, tp.visual.Healthbar end
+	end,
+	function(plate) -- Plater
+		local frame = plate.unitFrame
+		if type(frame) == "table" and frame.PlateFrame == plate then return frame, frame.healthBar end
+	end,
+	-- ponytail: EllesmereUI and Platynator keep theirs on child frames (a search); add them when someone uses them
+}
+
+local overlayByParent = {} -- [the plate frame a bar is part of] = its overlay
+local plateAdded = false -- a plate came on screen: repaint once its nameplate addon has set it up too
 
 local function PlatesWanted()
 	return ns.db and (ns.db.dotMarker or ns.db.swdMarker)
 end
 
-local function AddPlate(unit)
-	local plate = C_NamePlate.GetNamePlateForUnit(unit)
-	local bar = plate and plate.UnitFrame and plate.UnitFrame.healthBar
-	if not bar then return end
-	local o = overlayByPlate[plate]
-	if not o then
-		o = CreateOverlay(plate)
-		overlayByPlate[plate] = o
+-- The plate frame and health bar the unit's plate shows now: a nameplate addon's, or Blizzard's.
+local function PlateBar(plate)
+	for _, find in ipairs(PLATE_BARS) do
+		local ok, parent, bar = pcall(find, plate) -- other addons' tables may raise on lookups
+		if ok and type(bar) == "table" and bar.IsVisible and Visible(bar) then return parent, bar end
 	end
-	Attach(o, bar)
+	return plate, plate.UnitFrame and plate.UnitFrame.healthBar
+end
+
+-- The overlay on the bar the unit's plate shows now, set up on it (nil if there's none).
+local function PlateOverlay(unit)
+	local plate = C_NamePlate.GetNamePlateForUnit(unit)
+	if not plate then return end
+	local parent, bar = PlateBar(plate)
+	if not bar then return end
+	local o = overlayByParent[parent]
+	if not o then
+		o = CreateOverlay(parent)
+		overlayByParent[parent] = o
+	end
+	if o.bar ~= bar then Attach(o, bar) end
 	local level = bar:GetFrameLevel()
-	SetLayer(o, nil, (issecretvalue(level) and 10 or level) + 5)
+	level = (issecretvalue(level) and 10 or level) + 5
+	if o.level ~= level then
+		o.level = level
+		SetLayer(o, nil, level)
+	end
+	return o
+end
+
+local function AddPlate(unit)
+	local o = PlateOverlay(unit)
+	if not o then return end
 	plates[unit] = o
+	plateAdded = true
 	ScanAuras(unit, true) -- debuffs and threat already on it aren't new
 	ScanThreat(unit, true)
 end
@@ -795,7 +836,14 @@ local raisedAt = 0
 
 local function Refresh()
 	if #pending > 0 then TryMatch() end -- lets unmatched messages expire
-	for unit, o in pairs(plates) do Update(o, unit) end
+	for unit, o in pairs(plates) do
+		local now = PlateOverlay(unit) or o -- Blizzard's bar or Threat Plates', whichever shows now
+		if now ~= o then
+			o.clip:Hide()
+			plates[unit] = now
+		end
+		Update(now, unit)
+	end
 	if not target then return end
 	-- Blizzard can re-layer the target frame at any time; check once a second.
 	if GetTime() - raisedAt > 1 then
@@ -1029,8 +1077,8 @@ hits:SetScript("OnUpdate", function()
 	end
 	wipe(pendingHits)
 	pendingLines = 0
-	if pendingPaint then
-		pendingPaint = false
+	if pendingPaint or plateAdded then
+		pendingPaint, plateAdded = false, false
 		RefreshNow()
 	end
 end)
