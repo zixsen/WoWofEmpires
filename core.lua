@@ -259,9 +259,14 @@ local function PlayKey(key)
 	end
 end
 
-local function OnChat(event, text, sender)
+-- Of the channels, only custom ones (/join) count: General, Trade and the like reach the whole zone.
+local function ZoneChannel(event, zoneChannelID)
+	return event == "CHAT_MSG_CHANNEL" and zoneChannelID ~= 0
+end
+
+local function OnChat(event, text, sender, _, _, _, _, zoneChannelID)
 	-- Forever hides chat text in restricted content (dungeons, encounters); skip those messages.
-	if issecretvalue(text) or issecretvalue(sender) then return end
+	if issecretvalue(text) or issecretvalue(sender) or ZoneChannel(event, zoneChannelID) then return end
 	local lower = text:lower()
 
 	if lower:sub(1, 4) == "tts:" then
@@ -281,10 +286,25 @@ local CHAT_EVENTS = {
 	-- WHISPER_INFORM is your own outgoing whisper, so the sender hears it too.
 	"CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE", "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM", "CHAT_MSG_GUILD",
 	"CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
+	"CHAT_MSG_CHANNEL", "CHAT_MSG_COMMUNITIES_CHANNEL",
 }
 for _, event in ipairs(CHAT_EVENTS) do
 	On(event, OnChat)
 end
+
+-- Community chat comes as CHAT_MSG_COMMUNITIES_CHANNEL only where the community is added to a chat
+-- window; elsewhere it's read from the community and passed on as that event. Guild chat is a
+-- community too, but it already comes as guild chat.
+On("CLUB_MESSAGE_ADDED", function(_, clubId, streamId, messageId)
+	if GetChannelName(("Community:%s:%s"):format(tostring(clubId), tostring(streamId))) > 0 then return end
+	local club = C_Club.GetClubInfo(clubId)
+	if not club or issecretvalue(club.clubType) or club.clubType == Enum.ClubType.Guild then return end
+	local message = C_Club.GetMessageInfo(clubId, streamId, messageId)
+	if not message or message.destroyed then return end
+	local name = message.author.isSelf and MyName() or message.author.name
+	if not name or issecretvalue(name) or issecretvalue(message.content) then return end
+	ns.Fire("CHAT_MSG_COMMUNITIES_CHANNEL", message.content, name)
+end)
 
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_BLINK)
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX_KOS)
@@ -346,8 +366,8 @@ local function Match(mine, other, name, word)
 end
 
 for _, event in ipairs(CHAT_EVENTS) do
-	On(event, function(_, text, sender)
-		if issecretvalue(text) or issecretvalue(sender) then return end
+	On(event, function(_, text, sender, _, _, _, _, zoneChannelID)
+		if issecretvalue(text) or issecretvalue(sender) or ZoneChannel(event, zoneChannelID) then return end
 		local word = text:lower() -- the whole message, as OnChat matches it
 		if event == "CHAT_MSG_WHISPER_INFORM" or IsMe(sender) then
 			if ns.words[word] then SendToAddonUsers("word:" .. word) end
