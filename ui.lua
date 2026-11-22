@@ -294,6 +294,8 @@ SlashCmdList.WOWOFEMPIRES = function(msg)
 		ns.DotsDebug()
 	elseif msg == "dots trace" then
 		ns.DotsTrace()
+	elseif msg == "chat" then
+		ns.ChatTrace()
 	else
 		ns.ToggleWindow()
 	end
